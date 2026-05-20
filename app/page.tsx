@@ -90,6 +90,7 @@ export default function JGoAppPrototype() {
     address: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [paymentMessage, setPaymentMessage] = useState("");
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
 
@@ -123,11 +124,19 @@ export default function JGoAppPrototype() {
 
     if (params.get("payment") === "success") {
       const savedUser = localStorage.getItem("jgo_current_user");
+
+      setPaymentMessage("付款成功，正在更新訂單...");
+      setTab("payment-result");
+
       if (savedUser) {
         const user = JSON.parse(savedUser);
         setCurrentUser(user);
-        setTab("orders");
+
+        setTimeout(() => {
+          loadOrdersForUser(user);
+        }, 1500);
       }
+
       window.history.replaceState({}, "", window.location.pathname);
       return;
     }
@@ -988,6 +997,25 @@ export default function JGoAppPrototype() {
                   </CardContent>
                 </Card>
               )}
+            </motion.div>
+          )}
+
+          {tab === "payment-result" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+              <div className="rounded-3xl bg-neutral-50 p-8 text-center">
+                <CheckCircle2 className="mx-auto mb-3 text-green-500" size={42} />
+                <h2 className="text-xl font-black">付款成功</h2>
+                <p className="mt-2 text-sm text-neutral-500">
+                  {paymentMessage || "正在確認你的訂單狀態"}
+                </p>
+
+                <Button
+                  onClick={() => setTab("orders")}
+                  className="mt-5 rounded-2xl bg-neutral-900"
+                >
+                  查看我的訂單
+                </Button>
+              </div>
             </motion.div>
           )}
 
