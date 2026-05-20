@@ -94,7 +94,6 @@ export default function JGoAppPrototype() {
       if (savedUser) {
         const user = JSON.parse(savedUser);
         setCurrentUser(user);
-        loadOrdersForUser(user);
         setTab("orders");
       }
       window.history.replaceState({}, "", window.location.pathname);
@@ -289,7 +288,6 @@ export default function JGoAppPrototype() {
     localStorage.setItem("jgo_current_user", JSON.stringify(user));
     setAccountForm({ name: user.name, email: user.email, phone: user.phone });
     setCheckoutForm({ name: user.name, email: user.email, phone: user.phone });
-    loadOrdersForUser(user);
     setTab("account");
   };
 
@@ -304,7 +302,6 @@ export default function JGoAppPrototype() {
     localStorage.setItem("jgo_current_user", JSON.stringify(user));
     setAccountForm({ name: user.name, email: user.email, phone: user.phone });
     setCheckoutForm({ name: user.name, email: user.email, phone: user.phone });
-    loadOrdersForUser(user);
     setTab("account");
   };
 
