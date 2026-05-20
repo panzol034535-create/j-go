@@ -132,9 +132,10 @@ export default function JGoAppPrototype() {
         const user = JSON.parse(savedUser);
         setCurrentUser(user);
 
-        setTimeout(() => {
-          loadOrdersForUser(user);
-        }, 1500);
+        setTimeout(async () => {
+          await loadOrdersForUser(user);
+          setTab("orders");
+        }, 3500);
       }
 
       window.history.replaceState({}, "", window.location.pathname);
