@@ -1,0 +1,1186 @@
+"use client";
+
+import React, { useMemo, useState, useEffect } from "react";
+import { motion } from "framer-motion";
+import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut } from "lucide-react";
+
+function Button({ children, onClick, className = "" }) {
+  const hasColorOverride = className.includes("text-neutral") || className.includes("text-black") || className.includes("text-white");
+
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center justify-center rounded-md px-4 py-2 font-bold transition ${hasColorOverride ? "" : "text-white"} ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Card({ children, className = "" }) {
+  return <div className={`border bg-white ${className}`}>{children}</div>;
+}
+
+function CardContent({ children, className = "" }) {
+  return <div className={className}>{children}</div>;
+}
+
+const fallbackProducts = [
+  {
+    id: 1,
+    name: "日系寬版短袖襯衫",
+    brand: "J-GO Select",
+    price: 1280,
+    compareAt: 1680,
+    image: "https://images.unsplash.com/photo-1516257984-b1b4d707412e?q=80&w=1200&auto=format&fit=crop",
+    images: [
+      "https://images.unsplash.com/photo-1516257984-b1b4d707412e?q=80&w=1200&auto=format&fit=crop",
+      "https://images.unsplash.com/photo-1520975954732-35dd22299614?q=80&w=1200&auto=format&fit=crop",
+      "https://images.unsplash.com/photo-1473966968600-fa801b869a1a?q=80&w=1200&auto=format&fit=crop",
+    ],
+    variants: [
+      {
+        color: "白色",
+        sizes: [
+          { name: "M", stock: 3 },
+          { name: "L", stock: 2 },
+          { name: "XL", stock: 0 },
+        ],
+      },
+      {
+        color: "黑色",
+        sizes: [
+          { name: "M", stock: 2 },
+          { name: "L", stock: 1 },
+        ],
+      },
+      {
+        color: "卡其",
+        sizes: [
+          { name: "XL", stock: 1 },
+        ],
+      },
+    ],
+    colors: ["白色", "黑色", "卡其"],
+    sizes: ["M", "L", "XL"],
+    tag: "中性穿搭",
+  },
+];
+
+function formatPrice(n) {
+  const value = Number(n);
+  if (Number.isNaN(value)) return "NT$ 0";
+  return `NT$ ${value.toLocaleString("zh-TW")}`;
+}
+
+const XANO_CHECKOUT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/checkout";
+const XANO_ADD_ORDER_ITEM_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/add-order-item";
+const XANO_GET_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/Get_Orders";
+const XANO_GET_ORDER_ITEMS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/order-items";
+const XANO_PRODUCTS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/products";
+const XANO_CREATE_ECPAY_ORDER_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-ecpay-order";
+const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-cvs-map";
+
+export default function JGoAppPrototype() {
+  const [tab, setTab] = useState("home");
+  const [products, setProducts] = useState(fallbackProducts);
+  const [selectedProduct, setSelectedProduct] = useState(fallbackProducts[0]);
+  const [selectedColor, setSelectedColor] = useState(fallbackProducts[0].colors[0]);
+  const [selectedSize, setSelectedSize] = useState(fallbackProducts[0].variants[0].sizes[0].name);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [cart, setCart] = useState([]);
+  const [delivery, setDelivery] = useState("711");
+  const [orders, setOrders] = useState([]);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authForm, setAuthForm] = useState({ name: "", email: "", phone: "", password: "" });
+  const [accountForm, setAccountForm] = useState({ name: "", email: "", phone: "" });
+  const [checkoutForm, setCheckoutForm] = useState({ name: "", email: "", phone: "" });
+  const [pickupStore, setPickupStore] = useState({
+    store_name: "",
+    store_id: "",
+    address: "",
+  });
+  const [shippingAddress, setShippingAddress] = useState({
+    city: "",
+    district: "",
+    address: "",
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const touchStartX = React.useRef(null);
+
+  const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem("jgo_current_user");
+    if (savedUser) {
+      const user = JSON.parse(savedUser);
+      setCurrentUser(user);
+      setAccountForm({ name: user.name, email: user.email, phone: user.phone });
+      setCheckoutForm({ name: user.name, email: user.email, phone: user.phone });
+      loadOrdersForUser(user);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get("payment") === "success") {
+      const savedUser = localStorage.getItem("jgo_current_user");
+      if (savedUser) {
+        const user = JSON.parse(savedUser);
+        setCurrentUser(user);
+        loadOrdersForUser(user);
+        setTab("orders");
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+
+    const storeId = params.get("store_id") || params.get("CVSStoreID");
+    const storeName = params.get("store_name") || params.get("CVSStoreName");
+    const storeAddress = params.get("address") || params.get("CVSAddress");
+
+    if (storeId && storeName) {
+      setPickupStore({
+        store_id: storeId,
+        store_name: storeName,
+        address: storeAddress || "",
+      });
+      setDelivery("711");
+      setTab("checkout");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadProducts = async () => {
+      try {
+        const response = await fetch(XANO_PRODUCTS_URL);
+
+        if (!response.ok) {
+          throw new Error("商品 API 載入失敗");
+        }
+
+        const data = await response.json();
+        const productList = Array.isArray(data) ? data : [];
+
+        const formattedProducts = productList.map((product) => {
+          const images = product.images
+            ? product.images.split(",").map((url) => url.trim()).filter(Boolean)
+            : product.image
+              ? [product.image]
+              : [];
+
+          return {
+            id: product.id,
+            name: product.name,
+            brand: product.brand,
+            price: product.price,
+            compareAt: product.compare_at,
+            image: images[0] || product.image,
+            images,
+            colors: product.colors ? product.colors.split(",").map((color) => color.trim()).filter(Boolean) : [],
+            sizes: product.sizes ? product.sizes.split(",").map((size) => size.trim()).filter(Boolean) : [],
+            variants: product.variants
+              ? product.variants.split(";").map((variant) => {
+                  const [color, ...sizeParts] = variant.split(":");
+                  const sizeText = sizeParts.join(":");
+                  return {
+                    color: color?.trim(),
+                    sizes: sizeText
+                      ? sizeText.split(",").map((sizeItem) => {
+                          const [sizeName, stockText] = sizeItem.split(":");
+                          return {
+                            name: sizeName?.trim(),
+                            stock: Number(stockText ?? 999),
+                          };
+                        }).filter((size) => size.name)
+                      : [],
+                  };
+                })
+              : [],
+            tag: product.tag || "日本選品",
+          };
+        });
+
+        if (formattedProducts.length > 0) {
+          setProducts(formattedProducts);
+          setSelectedProduct(formattedProducts[0]);
+          setSelectedColor(formattedProducts[0].variants?.[0]?.color || formattedProducts[0].colors[0]);
+          setSelectedSize(formattedProducts[0].variants?.[0]?.sizes?.find((size) => size.stock > 0)?.name || formattedProducts[0].variants?.[0]?.sizes?.[0]?.name || formattedProducts[0].sizes[0]);
+          setSelectedImageIndex(0);
+        }
+      } catch (error) {
+        console.error("讀取商品失敗", error);
+      }
+    };
+
+    loadProducts();
+  }, []);
+  const shipping = subtotal > 0 ? 60 : 0;
+  const total = subtotal + shipping;
+
+  const openProduct = (product) => {
+    setSelectedProduct(product);
+    setSelectedColor(product.variants?.[0]?.color || product.colors[0]);
+    setSelectedSize(product.variants?.[0]?.sizes?.find((size) => size.stock > 0)?.name || product.variants?.[0]?.sizes?.[0]?.name || product.sizes[0]);
+    setSelectedImageIndex(0);
+    setTab("product");
+  };
+
+  const requireLogin = (targetTab = "account") => {
+    alert("請先登入會員");
+    setTab(targetTab);
+    return false;
+  };
+
+  const addToCart = () => {
+    if (!currentUser) return requireLogin();
+
+    if (!selectedSize || selectedSizeStock <= 0) {
+      alert("這個顏色 / 尺寸目前缺貨");
+      return;
+    }
+
+    const key = `${selectedProduct.id}-${selectedColor}-${selectedSize}`;
+    setCart((prev) => {
+      const exists = prev.find((item) => item.key === key);
+      if (exists) {
+        if (exists.qty >= selectedSizeStock) {
+          alert(`庫存只剩 ${selectedSizeStock} 件`);
+          return prev;
+        }
+        return prev.map((item) => item.key === key ? { ...item, qty: item.qty + 1 } : item);
+      }
+      return [...prev, { key, ...selectedProduct, color: selectedColor, size: selectedSize, stock: selectedSizeStock, qty: 1 }];
+    });
+    setTab("cart");
+  };
+
+  const updateQty = (key, delta) => {
+    setCart((prev) => prev
+      .map((item) => {
+        if (item.key !== key) return item;
+        const nextQty = Math.max(1, item.qty + delta);
+        if (nextQty > item.stock) {
+          alert(`庫存只剩 ${item.stock} 件`);
+          return item;
+        }
+        return { ...item, qty: nextQty };
+      })
+    );
+  };
+
+  const removeItem = (key) => setCart((prev) => prev.filter((item) => item.key !== key));
+
+  const productImages = selectedProduct?.images?.length ? selectedProduct.images : [selectedProduct?.image].filter(Boolean);
+
+  const currentVariant = selectedProduct?.variants?.find(
+    (variant) => variant.color === selectedColor
+  );
+
+  const availableSizeOptions = currentVariant?.sizes?.length
+    ? currentVariant.sizes
+    : (selectedProduct?.sizes || []).map((size) => ({ name: size, stock: 999 }));
+
+  const availableSizes = availableSizeOptions.map((size) => size.name);
+  const selectedSizeStock = availableSizeOptions.find((size) => size.name === selectedSize)?.stock ?? 999;
+
+  const goToPrevImage = () => {
+    if (productImages.length <= 1) return;
+    setSelectedImageIndex((prev) => (prev - 1 + productImages.length) % productImages.length);
+  };
+
+  const goToNextImage = () => {
+    if (productImages.length <= 1) return;
+    setSelectedImageIndex((prev) => (prev + 1) % productImages.length);
+  };
+
+  const handleImageTouchStart = (event) => {
+    touchStartX.current = event.touches[0].clientX;
+  };
+
+  const handleImageTouchEnd = (event) => {
+    if (touchStartX.current === null) return;
+    const diff = touchStartX.current - event.changedTouches[0].clientX;
+    if (Math.abs(diff) > 40) {
+      diff > 0 ? goToNextImage() : goToPrevImage();
+    }
+    touchStartX.current = null;
+  };
+
+  const loginWithGoogle = () => {
+    const user = { name: "J-GO 會員", email: "demo@gmail.com", phone: "0912345678", provider: "Google" };
+    setCurrentUser(user);
+    localStorage.setItem("jgo_current_user", JSON.stringify(user));
+    setAccountForm({ name: user.name, email: user.email, phone: user.phone });
+    setCheckoutForm({ name: user.name, email: user.email, phone: user.phone });
+    loadOrdersForUser(user);
+    setTab("account");
+  };
+
+  const submitAuth = () => {
+    const user = {
+      name: authForm.name || "J-GO 會員",
+      email: authForm.email || "demo@example.com",
+      phone: authForm.phone || "0912345678",
+      provider: authMode === "register" ? "Email 註冊" : "Email 登入",
+    };
+    setCurrentUser(user);
+    localStorage.setItem("jgo_current_user", JSON.stringify(user));
+    setAccountForm({ name: user.name, email: user.email, phone: user.phone });
+    setCheckoutForm({ name: user.name, email: user.email, phone: user.phone });
+    loadOrdersForUser(user);
+    setTab("account");
+  };
+
+  const saveAccount = () => {
+    const updatedUser = {
+      ...currentUser,
+      name: accountForm.name || "J-GO 會員",
+      email: accountForm.email || "demo@example.com",
+      phone: accountForm.phone || "0912345678",
+    };
+    setCurrentUser(updatedUser);
+    localStorage.setItem("jgo_current_user", JSON.stringify(updatedUser));
+    setCheckoutForm({ name: updatedUser.name, email: updatedUser.email, phone: updatedUser.phone });
+    alert("帳號資料已更新");
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem("jgo_current_user");
+    setCart([]);
+    setOrders([]);
+    setCheckoutForm({ name: "", email: "", phone: "" });
+    setAccountForm({ name: "", email: "", phone: "" });
+    setTab("account");
+  };
+
+  const getUserOrderKey = (user) => user?.email || "guest";
+
+  const saveOrderForUser = (user, newOrder) => {
+    const key = getUserOrderKey(user);
+    const savedOrders = JSON.parse(localStorage.getItem("jgo_orders_by_user") || "{}");
+    const nextOrders = [newOrder, ...(savedOrders[key] || [])];
+    savedOrders[key] = nextOrders;
+    localStorage.setItem("jgo_orders_by_user", JSON.stringify(savedOrders));
+    setOrders(nextOrders);
+  };
+
+  const loadOrdersForUser = async (user) => {
+    if (!user?.email) {
+      setOrders([]);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${XANO_GET_ORDERS_URL}?customer_email=${encodeURIComponent(user.email)}`);
+
+      if (!response.ok) {
+        throw new Error(`讀取訂單失敗：${response.status}`);
+      }
+
+      const data = await response.json();
+      const xanoOrders = Array.isArray(data) ? data : data?.items || [];
+
+      xanoOrders.sort((a, b) => Number(b.created_at) - Number(a.created_at));
+
+      const formattedOrders = await Promise.all(
+        xanoOrders.map(async (order) => {
+          let items = [];
+
+          try {
+            const itemsResponse = await fetch(`${XANO_GET_ORDER_ITEMS_URL}?order_id=${order.id}`);
+            if (itemsResponse.ok) {
+              const itemsData = await itemsResponse.json();
+              items = Array.isArray(itemsData) ? itemsData : itemsData?.items || [];
+            }
+          } catch (error) {
+            console.error("讀取訂單明細失敗", error);
+          }
+
+          return {
+            id: order.id,
+            items,
+            total: order.total_price || 0,
+            delivery: order.delivery_method || "711",
+            pickupStore: {
+              store_name: order.pickup_store_name || "",
+              store_id: order.pickup_store_code || "",
+              address: order.pickup_store_address || "",
+            },
+            shippingAddress: {
+              city: order.home_city || "",
+              district: order.home_district || "",
+              address: order.home_address || "",
+            },
+            status: order.payment_status || "Pending",
+            createdAt: order.created_at ? new Date(Number(order.created_at)).toLocaleString("zh-TW") : ""
+          };
+        })
+      );
+
+      setOrders(formattedOrders);
+    } catch (error) {
+      console.error(error);
+      alert(error.message);
+      setOrders([]);
+    }
+  };
+
+  const submitOrder = async () => {
+    if (isSubmitting) return;
+    if (!currentUser) return requireLogin();
+    if (cart.length === 0) return;
+
+    if (!checkoutForm.name || !checkoutForm.email || !checkoutForm.phone) {
+      alert("請先填寫結帳姓名、Email 和手機號碼");
+      return;
+    }
+
+    if (delivery === "711" && (!pickupStore.store_name || !pickupStore.store_id || !pickupStore.address)) {
+      alert("請先選擇 7-11 門市");
+      return;
+    }
+
+    if (delivery === "home" && (!shippingAddress.city || !shippingAddress.district || !shippingAddress.address)) {
+      alert("請先填寫完整宅配地址");
+      return;
+    }
+
+    if (XANO_CHECKOUT_URL.includes("請貼上")) {
+      alert("請先把 XANO_CHECKOUT_URL 換成你的 Xano /checkout API URL");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(XANO_CHECKOUT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customer_name: checkoutForm.name,
+          customer_email: checkoutForm.email,
+          customer_phone: checkoutForm.phone,
+          delivery_method: delivery,
+          total_price: total,
+          pickup_store_name: pickupStore.store_name,
+          pickup_store_code: pickupStore.store_id,
+          pickup_store_address: pickupStore.address,
+          home_city: shippingAddress.city,
+          home_district: shippingAddress.district,
+          home_address: shippingAddress.address,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Checkout failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("checkout response", data);
+
+      const ecpayResponse = await fetch(XANO_CREATE_ECPAY_ORDER_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          order_id: data.id,
+          customer_name: checkoutForm.name,
+          customer_email: checkoutForm.email,
+          total_price: total,
+        }),
+      });
+
+      if (!ecpayResponse.ok) {
+        throw new Error("建立綠界訂單失敗");
+      }
+
+      const ecpayData = await ecpayResponse.json();
+
+      console.log("ecpay response", ecpayData);
+
+      const orderId = data.id;
+
+      if (!orderId) {
+        throw new Error("Xano checkout 沒有回傳 order id");
+      }
+
+      console.log("準備送出 order_items", { orderId, cart });
+
+      for (const item of cart) {
+        console.log("送出單筆商品", {
+          order_id: orderId,
+          product_name: item.name || item.product_name || selectedProduct?.name || "JGO商品",
+          color: item.color,
+          size: item.size,
+          qty: item.qty,
+          unit_price: item.price,
+          subtotal: item.price * item.qty,
+        });
+
+        const itemResponse = await fetch(XANO_ADD_ORDER_ITEM_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            order_id: orderId,
+            product_name: item.name || item.product_name || selectedProduct?.name || "JGO商品",
+          color: item.color,
+            size: item.size,
+            qty: item.qty,
+            unit_price: item.price,
+            subtotal: item.price * item.qty,
+          }),
+        });
+
+        const itemText = await itemResponse.text();
+        let itemData = null;
+
+        try {
+          itemData = itemText ? JSON.parse(itemText) : null;
+        } catch {
+          itemData = itemText;
+        }
+
+        console.log("add order item response", itemResponse.status, itemData);
+
+        if (!itemResponse.ok) {
+          throw new Error(`新增商品明細失敗：${itemResponse.status}，${itemText}`);
+        }
+      }
+
+      const order = {
+        id: orderId || `JG-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${String(orders.length + 1).padStart(4, "0")}`,
+        items: cart.map((item) => ({
+          id: item.key,
+          product_name: item.name || item.product_name || selectedProduct?.name || "JGO商品",
+          color: item.color,
+          size: item.size,
+          qty: item.qty,
+          unit_price: item.price,
+          subtotal: item.price * item.qty,
+        })),
+        total,
+        delivery,
+        pickupStore,
+        shippingAddress,
+        status: data.payment_status || "Pending",
+        createdAt: new Date().toLocaleString("zh-TW"),
+      };
+
+      saveOrderForUser(currentUser, order);
+      setCart([]);
+
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = ecpayData.payment_url;
+
+      Object.entries(ecpayData).forEach(([key, value]) => {
+        if (key === "payment_url" || key === "merchant_trade_no") return;
+
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = key;
+        input.value = String(value);
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+    } catch (error) {
+      console.error(error);
+      alert(`訂單建立失敗：${error.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-neutral-50 text-neutral-900">
+      <div className="mx-auto flex min-h-screen max-w-md flex-col bg-white shadow-2xl">
+        <header className="sticky top-0 z-10 border-b bg-white/90 px-5 py-4 backdrop-blur">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-neutral-500">From Japan, To You</p>
+              <h1 className="text-2xl font-black tracking-tight">J-GO</h1>
+            </div>
+            <div className="flex items-center gap-2">
+            <button onClick={() => setTab("account")} className="rounded-full border border-neutral-200 p-3 text-neutral-700">
+              <User size={20} />
+            </button>
+            <button onClick={() => setTab("cart")} className="relative rounded-full bg-neutral-900 p-3 text-white">
+              <ShoppingBag size={20} />
+              {cart.length > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-xs">{cart.length}</span>}
+            </button>
+          </div>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto px-5 py-5 pb-24">
+          {tab === "home" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <section className="rounded-3xl bg-neutral-900 p-6 text-white">
+                <p className="mb-2 text-sm text-neutral-300">日系男裝 × 中性穿搭 × 整套買</p>
+                <h2 className="text-3xl font-black leading-tight">日本選品，透明價格，快速預購。</h2>
+                <Button onClick={() => setTab("shop")} className="mt-5 rounded-2xl bg-white text-neutral-900 hover:bg-neutral-100">開始逛商品</Button>
+              </section>
+
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-lg font-bold">本週推薦</h3>
+                  <button onClick={() => setTab("shop")} className="text-sm text-neutral-500">看全部</button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {products.slice(0, 2).map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
+                </div>
+              </section>
+            </motion.div>
+          )}
+
+          {tab === "shop" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <div className="flex items-center gap-2 rounded-2xl bg-neutral-100 px-4 py-3">
+                <Search size={18} className="text-neutral-400" />
+                <span className="text-sm text-neutral-500">搜尋日系襯衫、寬褲、外套</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {products.map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
+              </div>
+            </motion.div>
+          )}
+
+          {tab === "product" && selectedProduct && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <div className="space-y-3">
+                <div
+                  className="relative overflow-hidden rounded-3xl bg-neutral-100"
+                  onTouchStart={handleImageTouchStart}
+                  onTouchEnd={handleImageTouchEnd}
+                >
+                  <img
+                    src={productImages[selectedImageIndex] || selectedProduct.image}
+                    alt={selectedProduct.name}
+                    className="h-80 w-full object-contain"
+                  />
+                  {productImages.length > 1 && (
+                    <>
+                      <button onClick={goToPrevImage} className="absolute left-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white/80 text-xl font-black shadow-sm">‹</button>
+                      <button onClick={goToNextImage} className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white/80 text-xl font-black shadow-sm">›</button>
+                    </>
+                  )}
+                  {productImages.length > 1 && (
+                    <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-1 rounded-full bg-white/80 px-3 py-2 backdrop-blur">
+                      {productImages.map((_, index) => (
+                        <button
+                          key={index}
+                          onClick={() => setSelectedImageIndex(index)}
+                          className={`h-2 w-2 rounded-full ${selectedImageIndex === index ? "bg-neutral-900" : "bg-neutral-300"}`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {productImages.length > 1 && (
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {productImages.map((image, index) => (
+                      <button key={image} onClick={() => setSelectedImageIndex(index)} className={`shrink-0 overflow-hidden rounded-2xl border-2 ${selectedImageIndex === index ? "border-neutral-900" : "border-transparent"}`}>
+                        <img src={image} alt={`${selectedProduct.name}-${index}`} className="h-16 w-16 object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <p className="text-sm text-neutral-500">{selectedProduct.brand}</p>
+                <h2 className="text-2xl font-black">{selectedProduct.name}</h2>
+                <div className="mt-2 flex items-end gap-2">
+                  <span className="text-xl font-black">{formatPrice(selectedProduct.price)}</span>
+                  <span className="text-sm text-neutral-400 line-through">{formatPrice(selectedProduct.compareAt)}</span>
+                </div>
+              </div>
+              <OptionGroup
+                title="顏色"
+                options={selectedProduct.colors}
+                value={selectedColor}
+                setValue={(color) => {
+                  const nextVariant = selectedProduct.variants?.find((variant) => variant.color === color);
+                  const firstAvailableSize = nextVariant?.sizes?.find((size) => size.stock > 0)?.name || nextVariant?.sizes?.[0]?.name || "";
+                  setSelectedColor(color);
+                  setSelectedSize(firstAvailableSize);
+                }}
+              />
+              <OptionGroup
+                title="尺寸"
+                options={availableSizes}
+                value={selectedSize}
+                setValue={setSelectedSize}
+                disabledOptions={availableSizeOptions.filter((size) => size.stock <= 0).map((size) => size.name)}
+                stockMap={Object.fromEntries(availableSizeOptions.map((size) => [size.name, size.stock]))}
+              />
+              {selectedSize && selectedSizeStock <= 3 && selectedSizeStock > 0 && (
+                <p className="text-sm font-bold text-red-500">此尺寸只剩 {selectedSizeStock} 件</p>
+              )}
+              {selectedSize && selectedSizeStock <= 0 && (
+                <p className="text-sm font-bold text-red-500">此尺寸目前缺貨</p>
+              )}
+              <Button onClick={addToCart} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">加入購物車</Button>
+              {!currentUser && <p className="text-center text-sm text-neutral-400">登入後才能加入購物車與結帳</p>}
+            </motion.div>
+          )}
+
+          {tab === "cart" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+              <h2 className="text-2xl font-black">購物車</h2>
+              {cart.length === 0 ? (
+                <EmptyState title="購物車是空的" text="先去挑一套日系穿搭吧。" action={() => setTab("shop")} />
+              ) : (
+                <>
+                  {cart.map((item) => (
+                    <Card key={item.key} className="rounded-3xl border-neutral-100 shadow-sm">
+                      <CardContent className="flex gap-3 p-3">
+                        <img src={item.image} alt={item.name} className="h-24 w-20 rounded-2xl object-cover" />
+                        <div className="flex-1">
+                          <h3 className="font-bold leading-tight">{item.name}</h3>
+                          <p className="mt-1 text-xs text-neutral-500">{item.color} / {item.size}</p>
+                          <p className="mt-2 font-bold">{formatPrice(item.price)}</p>
+                          <div className="mt-2 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => updateQty(item.key, -1)} className="rounded-full border p-1"><Minus size={14} /></button>
+                              <span className="w-5 text-center text-sm">{item.qty}</span>
+                              <button onClick={() => updateQty(item.key, 1)} className="rounded-full border p-1"><Plus size={14} /></button>
+                            </div>
+                            <button onClick={() => removeItem(item.key)} className="text-neutral-400"><Trash2 size={18} /></button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  <PriceBox subtotal={subtotal} shipping={shipping} total={total} />
+                  <Button onClick={() => {
+                    if (!currentUser) return requireLogin();
+                    setTab("checkout");
+                  }} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">前往結帳</Button>
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {tab === "checkout" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <h2 className="text-2xl font-black">結帳</h2>
+              <section className="space-y-3">
+                <Input label="姓名" placeholder="王小明" value={checkoutForm.name} onChange={(value) => setCheckoutForm({ ...checkoutForm, name: value })} />
+                <Input label="手機" placeholder="0912345678" value={checkoutForm.phone} onChange={(value) => setCheckoutForm({ ...checkoutForm, phone: value })} />
+                <Input label="Email" placeholder="hello@example.com" value={checkoutForm.email} onChange={(value) => setCheckoutForm({ ...checkoutForm, email: value })} icon={<Mail size={18} />} />
+              </section>
+              <section>
+                <h3 className="mb-3 font-bold">配送方式</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <DeliveryButton active={delivery === "711"} onClick={() => setDelivery("711")} icon={<Store size={18} />} title="7-11 取貨" />
+                  <DeliveryButton active={delivery === "home"} onClick={() => setDelivery("home")} icon={<Truck size={18} />} title="宅配" />
+                </div>
+              </section>
+              {delivery === "711" ? (
+                <Card className="rounded-3xl border-neutral-100">
+                  <CardContent className="space-y-2 p-4">
+                    <div className="flex items-center gap-2 font-bold"><MapPin size={18} /> 已選門市</div>
+                    <p className="text-sm text-neutral-600">
+                      {pickupStore.store_name || "尚未選擇門市"}
+                      {pickupStore.store_id && `｜${pickupStore.store_id}`}
+                    </p>
+                    <p className="text-sm text-neutral-500">
+                      {pickupStore.address || "請選擇 7-11 門市"}
+                    </p>
+                    <Button
+                      onClick={async () => {
+                        try {
+                          const response = await fetch(XANO_CREATE_CVS_MAP_URL, {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({
+                              logistics_sub_type: "UNIMART",
+                            }),
+                          });
+
+                          if (!response.ok) {
+                            throw new Error(`開啟門市地圖失敗：${response.status}`);
+                          }
+
+                          const data = await response.json();
+
+                          if (data.cvs_map_url) {
+                            const form = document.createElement("form");
+                            form.method = "POST";
+                            form.action = data.cvs_map_url;
+
+                            Object.entries(data).forEach(([key, value]) => {
+                              if (key === "cvs_map_url") return;
+
+                              const input = document.createElement("input");
+                              input.type = "hidden";
+                              input.name = key;
+                              input.value = String(value);
+                              form.appendChild(input);
+                            });
+
+                            document.body.appendChild(form);
+                            form.submit();
+                          } else {
+                            throw new Error("Xano 沒有回傳 cvs_map_url");
+                          }
+                        } catch (error) {
+                          console.error(error);
+                          alert(error.message || "開啟門市地圖失敗");
+                        }
+                      }}
+                      className="mt-2 rounded-2xl bg-neutral-900"
+                    >
+                      選擇門市
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <section className="space-y-3">
+                  <Input
+                    label="縣市"
+                    placeholder="新竹市"
+                    value={shippingAddress.city}
+                    onChange={(value) => setShippingAddress({ ...shippingAddress, city: value })}
+                  />
+                  <Input
+                    label="區域"
+                    placeholder="東區"
+                    value={shippingAddress.district}
+                    onChange={(value) => setShippingAddress({ ...shippingAddress, district: value })}
+                  />
+                  <Input
+                    label="詳細地址"
+                    placeholder="食品路 100 號"
+                    value={shippingAddress.address}
+                    onChange={(value) => setShippingAddress({ ...shippingAddress, address: value })}
+                  />
+                </section>
+              )}
+              <PriceBox subtotal={subtotal} shipping={shipping} total={total} />
+              <Button onClick={submitOrder} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
+                {isSubmitting ? "送出中..." : "送出訂單"}
+              </Button>
+            </motion.div>
+          )}
+
+          {tab === "account" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <h2 className="text-2xl font-black">我的帳號</h2>
+              {currentUser ? (
+                <Card className="rounded-3xl border-neutral-100 shadow-sm">
+                  <CardContent className="space-y-4 p-5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-900 text-xl font-black text-white">
+                        {currentUser.name.slice(0, 1)}
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-black">{currentUser.name}</h3>
+                        <p className="text-sm text-neutral-500">{currentUser.email}</p>
+                        <p className="text-sm text-neutral-500">{currentUser.phone}</p>
+                        <p className="text-xs text-neutral-400">登入方式：{currentUser.provider}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-3 rounded-3xl bg-neutral-50 p-4">
+                      <h4 className="font-black">編輯會員資料</h4>
+                      <Input label="姓名" placeholder="你的名字" value={accountForm.name} onChange={(value) => setAccountForm({ ...accountForm, name: value })} />
+                      <Input label="Gmail / Email" placeholder="hello@gmail.com" value={accountForm.email} onChange={(value) => setAccountForm({ ...accountForm, email: value })} icon={<Mail size={18} />} />
+                      <Input label="手機號碼" placeholder="0912345678" value={accountForm.phone} onChange={(value) => setAccountForm({ ...accountForm, phone: value })} />
+                      <Button onClick={saveAccount} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">儲存資料</Button>
+                    </div>
+
+                    <Button onClick={logout} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
+                      <LogOut size={18} className="mr-2" /> 登出
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="rounded-3xl border-neutral-100 shadow-sm">
+                  <CardContent className="space-y-4 p-5">
+                    <div className="grid grid-cols-2 gap-2 rounded-2xl bg-neutral-100 p-1">
+                      <button onClick={() => setAuthMode("login")} className={`rounded-xl py-2 text-sm font-bold ${authMode === "login" ? "bg-white shadow-sm" : "text-neutral-500"}`}>登入</button>
+                      <button onClick={() => setAuthMode("register")} className={`rounded-xl py-2 text-sm font-bold ${authMode === "register" ? "bg-white shadow-sm" : "text-neutral-500"}`}>註冊</button>
+                    </div>
+
+                    {authMode === "register" && (
+                      <Input label="姓名" placeholder="你的名字" value={authForm.name} onChange={(value) => setAuthForm({ ...authForm, name: value })} />
+                    )}
+                    <Input label="Email" placeholder="hello@example.com" value={authForm.email} onChange={(value) => setAuthForm({ ...authForm, email: value })} icon={<Mail size={18} />} />
+                    <Input label="手機號碼" placeholder="0912345678" value={authForm.phone} onChange={(value) => setAuthForm({ ...authForm, phone: value })} />
+                    <Input label="密碼" placeholder="至少 8 碼" type="password" value={authForm.password} onChange={(value) => setAuthForm({ ...authForm, password: value })} icon={<Lock size={18} />} />
+
+                    <Button onClick={submitAuth} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
+                      {authMode === "login" ? "登入" : "建立帳號"}
+                    </Button>
+
+                    <div className="flex items-center gap-3 text-xs text-neutral-400">
+                      <div className="h-px flex-1 bg-neutral-200" />
+                      或
+                      <div className="h-px flex-1 bg-neutral-200" />
+                    </div>
+
+                    <button onClick={loginWithGoogle} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-neutral-200 bg-white font-bold text-neutral-900">
+                      <span className="text-lg">G</span> 使用 Google 登入
+                    </button>
+                  </CardContent>
+                </Card>
+              )}
+            </motion.div>
+          )}
+
+          {tab === "orders" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+              <h2 className="text-2xl font-black">我的訂單</h2>
+              {orders.length === 0 ? (
+                <EmptyState title="目前沒有訂單" text="完成結帳後，訂單會出現在這裡。" action={() => setTab("shop")} />
+              ) : orders.map((order) => (
+                <button
+                  key={order.id}
+                  onClick={() => {
+                    setSelectedOrder(order);
+                    setTab("order-detail");
+                  }}
+                  className="block w-full text-left"
+                >
+                <Card className="rounded-3xl border-neutral-100 shadow-sm transition hover:shadow-md">
+                  <CardContent className="space-y-3 p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-black">{order.id}</p>
+                        <p className="text-xs text-neutral-500">{order.createdAt}</p>
+                      </div>
+                      <span className="rounded-full bg-yellow-100 px-3 py-1 text-xs font-bold text-yellow-700">{order.status}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-neutral-600"><Package size={16} /> {order.items.length} 件商品</div>
+                    {order.items.length > 0 && (
+                      <div className="space-y-2 rounded-2xl bg-neutral-50 p-3">
+                        {order.items.map((item) => (
+                          <div key={item.id || `${item.product_name}-${item.color}-${item.size}`} className="flex items-start justify-between gap-3 text-sm">
+                            <div>
+                              <p className="font-bold text-neutral-900">{item.product_name || item.name || "商品名稱未載入"}</p>
+                              <p className="text-xs text-neutral-500">{item.color} / {item.size} × {item.qty}</p>
+                            </div>
+                            <p className="font-bold">{formatPrice(item.subtotal ?? (item.unit_price || item.price || 0) * item.qty)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="space-y-1 text-sm text-neutral-600">
+                      <div className="flex items-center gap-2"><CheckCircle2 size={16} /> {order.delivery === "711" ? "7-11 取貨" : "宅配"}</div>
+                      {order.delivery === "711" && order.pickupStore?.store_name && (
+                        <p className="pl-6 text-xs text-neutral-500">{order.pickupStore.store_name}｜{order.pickupStore.store_id}<br />{order.pickupStore.address}</p>
+                      )}
+                      {order.delivery === "home" && order.shippingAddress?.address && (
+                        <p className="pl-6 text-xs text-neutral-500">{order.shippingAddress.city}{order.shippingAddress.district}{order.shippingAddress.address}</p>
+                      )}
+                    </div>
+                    <div className="border-t pt-3 text-right font-black">{formatPrice(order.total)}</div>
+                  </CardContent>
+                </Card>
+                </button>
+              ))}
+            </motion.div>
+          )}
+
+          {tab === "order-detail" && selectedOrder && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <button onClick={() => setTab("orders")} className="text-sm font-bold text-neutral-500">← 返回我的訂單</button>
+
+              <Card className="rounded-3xl border-neutral-100 shadow-sm">
+                <CardContent className="space-y-4 p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs text-neutral-400">訂單編號</p>
+                      <h2 className="text-2xl font-black">#{selectedOrder.id}</h2>
+                      <p className="mt-1 text-xs text-neutral-500">{selectedOrder.createdAt}</p>
+                    </div>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${selectedOrder.status === "Paid" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>
+                      {selectedOrder.status}
+                    </span>
+                  </div>
+
+                  <div className="rounded-3xl bg-neutral-50 p-4">
+                    <h3 className="mb-3 font-black">商品明細</h3>
+                    <div className="space-y-3">
+                      {selectedOrder.items.length > 0 ? selectedOrder.items.map((item) => (
+                        <div key={item.id || `${item.product_name}-${item.color}-${item.size}`} className="flex items-start justify-between gap-3 border-b border-neutral-200 pb-3 last:border-0 last:pb-0">
+                          <div>
+                            <p className="font-bold">{item.product_name || item.name || "商品名稱未載入"}</p>
+                            <p className="mt-1 text-xs text-neutral-500">{item.color} / {item.size} × {item.qty}</p>
+                            <p className="mt-1 text-xs text-neutral-400">單價 {formatPrice(item.unit_price || item.price || 0)}</p>
+                          </div>
+                          <p className="font-black">{formatPrice(item.subtotal ?? (item.unit_price || item.price || 0) * item.qty)}</p>
+                        </div>
+                      )) : (
+                        <p className="text-sm text-neutral-500">目前沒有商品明細</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl bg-neutral-50 p-4">
+                    <h3 className="mb-3 font-black">配送資訊</h3>
+                    {selectedOrder.delivery === "711" ? (
+                      <div className="space-y-1 text-sm text-neutral-600">
+                        <p className="font-bold text-neutral-900">7-11 取貨</p>
+                        <p>{selectedOrder.pickupStore?.store_name || "尚未選擇門市"} {selectedOrder.pickupStore?.store_id && `｜${selectedOrder.pickupStore.store_id}`}</p>
+                        <p>{selectedOrder.pickupStore?.address}</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1 text-sm text-neutral-600">
+                        <p className="font-bold text-neutral-900">宅配</p>
+                        <p>{selectedOrder.shippingAddress?.city}{selectedOrder.shippingAddress?.district}{selectedOrder.shippingAddress?.address}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-3xl bg-neutral-900 p-4 text-white">
+                    <div className="flex justify-between text-sm text-neutral-300"><span>商品小計</span><span>{formatPrice(Math.max((selectedOrder.total || 0) - 60, 0))}</span></div>
+                    <div className="mt-2 flex justify-between text-sm text-neutral-300"><span>運費</span><span>{formatPrice(60)}</span></div>
+                    <div className="mt-3 flex justify-between border-t border-white/20 pt-3 text-lg font-black"><span>總計</span><span>{formatPrice(selectedOrder.total)}</span></div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+        </main>
+
+        <nav className="sticky bottom-0 grid grid-cols-4 border-t bg-white px-3 py-2">
+          <NavButton active={tab === "home"} icon={<Home size={20} />} label="首頁" onClick={() => setTab("home")} />
+          <NavButton active={tab === "shop"} icon={<Search size={20} />} label="商品" onClick={() => setTab("shop")} />
+          <NavButton active={tab === "cart"} icon={<ShoppingBag size={20} />} label="購物車" onClick={() => setTab("cart")} />
+          <NavButton
+            active={tab === "orders"}
+            icon={<Package size={20} />}
+            label="訂單"
+            onClick={() => {
+              if (currentUser) loadOrdersForUser(currentUser);
+              setTab("orders");
+            }}
+          />
+        </nav>
+      </div>
+    </div>
+  );
+}
+
+function ProductCard({ product, onClick }) {
+  return (
+    <button onClick={onClick} className="text-left">
+      <Card className="overflow-hidden rounded-3xl border-neutral-100 shadow-sm transition hover:shadow-md">
+        <img src={product.image} alt={product.name} className="h-40 w-full object-cover" />
+        <CardContent className="p-3">
+          <span className="rounded-full bg-neutral-100 px-2 py-1 text-[11px] font-bold text-neutral-600">{product.tag}</span>
+          <h3 className="mt-2 line-clamp-2 font-bold leading-tight">{product.name}</h3>
+          <p className="mt-1 text-sm font-black">{formatPrice(product.price)}</p>
+        </CardContent>
+      </Card>
+    </button>
+  );
+}
+
+function OptionGroup({ title, options, value, setValue, disabledOptions = [], stockMap = {} }) {
+  return (
+    <section>
+      <h3 className="mb-3 font-bold">{title}</h3>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const isDisabled = disabledOptions.includes(option);
+          const stock = stockMap[option];
+
+          return (
+            <button
+              key={option}
+              disabled={isDisabled}
+              onClick={() => !isDisabled && setValue(option)}
+              className={`rounded-2xl border px-4 py-2 text-sm font-bold ${
+                isDisabled
+                  ? "cursor-not-allowed border-neutral-100 bg-neutral-100 text-neutral-300 line-through"
+                  : value === option
+                    ? "border-neutral-900 bg-neutral-900 text-white"
+                    : "border-neutral-200 bg-white text-neutral-700"
+              }`}
+            >
+              {option}
+              {typeof stock === "number" && stock > 0 && stock <= 3 && <span className="ml-1 text-[10px]">剩{stock}</span>}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function Input({ label, placeholder, value, onChange, type = "text", icon }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-bold">{label}</span>
+      <div className="flex h-12 items-center gap-2 rounded-2xl border border-neutral-200 px-4 focus-within:border-neutral-900">
+        {icon && <span className="text-neutral-400">{icon}</span>}
+        <input
+          className="h-full flex-1 bg-transparent outline-none"
+          placeholder={placeholder}
+          type={type}
+          value={value}
+          onChange={(e) => onChange?.(e.target.value)}
+        />
+      </div>
+    </label>
+  );
+}
+
+function DeliveryButton({ active, onClick, icon, title }) {
+  return (
+    <button onClick={onClick} className={`flex items-center justify-center gap-2 rounded-2xl border p-4 font-bold ${active ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white"}`}>
+      {icon}{title}
+    </button>
+  );
+}
+
+function PriceBox({ subtotal, shipping, total }) {
+  return (
+    <Card className="rounded-3xl border-neutral-100 bg-neutral-50">
+      <CardContent className="space-y-2 p-4 text-sm">
+        <div className="flex justify-between"><span>商品小計</span><span>{formatPrice(subtotal)}</span></div>
+        <div className="flex justify-between"><span>運費</span><span>{formatPrice(shipping)}</span></div>
+        <div className="flex justify-between border-t pt-2 text-base font-black"><span>總計</span><span>{formatPrice(total)}</span></div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function EmptyState({ title, text, action }) {
+  return (
+    <div className="rounded-3xl bg-neutral-50 p-8 text-center">
+      <ShoppingBag className="mx-auto mb-3 text-neutral-400" size={36} />
+      <h3 className="font-black">{title}</h3>
+      <p className="mt-1 text-sm text-neutral-500">{text}</p>
+      <Button onClick={action} className="mt-4 rounded-2xl bg-neutral-900">去逛逛</Button>
+    </div>
+  );
+}
+
+function NavButton({ active, icon, label, onClick }) {
+  return (
+    <button onClick={onClick} className={`flex flex-col items-center gap-1 rounded-2xl py-2 text-xs font-bold ${active ? "bg-neutral-100 text-neutral-900" : "text-neutral-400"}`}>
+      {icon}
+      {label}
+    </button>
+  );
+}
