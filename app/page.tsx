@@ -45,6 +45,7 @@ const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
   const [products, setProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
@@ -118,6 +119,7 @@ export default function JGoAppPrototype() {
 
   useEffect(() => {
     const loadProducts = async () => {
+      setLoadingProducts(true);
       try {
         const response = await fetch(XANO_PRODUCTS_URL);
 
@@ -176,6 +178,8 @@ export default function JGoAppPrototype() {
         }
       } catch (error) {
         console.error("讀取商品失敗", error);
+      } finally {
+        setLoadingProducts(false);
       }
     };
 
@@ -589,6 +593,11 @@ export default function JGoAppPrototype() {
 
         <main className="flex-1 overflow-y-auto px-5 py-5 pb-24">
           {tab === "home" && (
+            loadingProducts ? (
+              <div className="flex h-64 items-center justify-center text-neutral-400 font-bold">
+                商品載入中...
+              </div>
+            ) : (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
               <section className="rounded-3xl bg-neutral-900 p-6 text-white">
                 <p className="mb-2 text-sm text-neutral-300">日系男裝 × 中性穿搭 × 整套買</p>
@@ -606,6 +615,7 @@ export default function JGoAppPrototype() {
                 </div>
               </section>
             </motion.div>
+            )
           )}
 
           {tab === "shop" && (
