@@ -72,6 +72,7 @@ export default function JGoAppPrototype() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
+  const cartLoadedRef = React.useRef(false);
 
   const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
 
@@ -83,7 +84,40 @@ export default function JGoAppPrototype() {
       setAccountForm({ name: user.name, email: user.email, phone: user.phone });
       setCheckoutForm({ name: user.name, email: user.email, phone: user.phone });
     }
+
+    const savedCart = localStorage.getItem("jgo_cart");
+    if (savedCart) {
+      const parsedCart = JSON.parse(savedCart);
+      if (Array.isArray(parsedCart)) {
+        setCart(parsedCart);
+      }
+    }
+
+    const savedPickupStore = localStorage.getItem("jgo_pickup_store");
+    if (savedPickupStore) {
+      setPickupStore(JSON.parse(savedPickupStore));
+    }
+
+    const savedDelivery = localStorage.getItem("jgo_delivery");
+    if (savedDelivery) {
+      setDelivery(savedDelivery);
+    }
+
+    cartLoadedRef.current = true;
   }, []);
+
+  useEffect(() => {
+    if (!cartLoadedRef.current) return;
+    localStorage.setItem("jgo_cart", JSON.stringify(cart));
+  }, [cart]);
+
+  useEffect(() => {
+    localStorage.setItem("jgo_pickup_store", JSON.stringify(pickupStore));
+  }, [pickupStore]);
+
+  useEffect(() => {
+    localStorage.setItem("jgo_delivery", delivery);
+  }, [delivery]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -105,11 +139,13 @@ export default function JGoAppPrototype() {
     const storeAddress = params.get("address") || params.get("CVSAddress");
 
     if (storeId && storeName) {
-      setPickupStore({
+      const nextPickupStore = {
         store_id: storeId,
         store_name: storeName,
         address: storeAddress || "",
-      });
+      };
+      setPickupStore(nextPickupStore);
+      localStorage.setItem("jgo_pickup_store", JSON.stringify(nextPickupStore));
       setDelivery("711");
       setTab("checkout");
       window.history.replaceState({}, "", window.location.pathname);
@@ -581,6 +617,7 @@ export default function JGoAppPrototype() {
 
       saveOrderForUser(currentUser, order);
       setCart([]);
+      localStorage.removeItem("jgo_cart");
 
       const form = document.createElement("form");
       form.method = "POST";
@@ -827,6 +864,10 @@ export default function JGoAppPrototype() {
                           }
 
                           const data = await response.json();
+
+                          localStorage.setItem("jgo_cart", JSON.stringify(cart));
+                          localStorage.setItem("jgo_delivery", delivery);
+                          localStorage.setItem("jgo_pickup_store", JSON.stringify(pickupStore));
 
                           if (data.cvs_map_url) {
                             const form = document.createElement("form");
