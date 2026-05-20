@@ -26,47 +26,7 @@ function CardContent({ children, className = "" }) {
   return <div className={className}>{children}</div>;
 }
 
-const fallbackProducts = [
-  {
-    id: 1,
-    name: "日系寬版短袖襯衫",
-    brand: "J-GO Select",
-    price: 1280,
-    compareAt: 1680,
-    image: "https://images.unsplash.com/photo-1516257984-b1b4d707412e?q=80&w=1200&auto=format&fit=crop",
-    images: [
-      "https://images.unsplash.com/photo-1516257984-b1b4d707412e?q=80&w=1200&auto=format&fit=crop",
-      "https://images.unsplash.com/photo-1520975954732-35dd22299614?q=80&w=1200&auto=format&fit=crop",
-      "https://images.unsplash.com/photo-1473966968600-fa801b869a1a?q=80&w=1200&auto=format&fit=crop",
-    ],
-    variants: [
-      {
-        color: "白色",
-        sizes: [
-          { name: "M", stock: 3 },
-          { name: "L", stock: 2 },
-          { name: "XL", stock: 0 },
-        ],
-      },
-      {
-        color: "黑色",
-        sizes: [
-          { name: "M", stock: 2 },
-          { name: "L", stock: 1 },
-        ],
-      },
-      {
-        color: "卡其",
-        sizes: [
-          { name: "XL", stock: 1 },
-        ],
-      },
-    ],
-    colors: ["白色", "黑色", "卡其"],
-    sizes: ["M", "L", "XL"],
-    tag: "中性穿搭",
-  },
-];
+const fallbackProducts = [];
 
 function formatPrice(n) {
   const value = Number(n);
@@ -84,10 +44,10 @@ const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/
 
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
-  const [products, setProducts] = useState(fallbackProducts);
-  const [selectedProduct, setSelectedProduct] = useState(fallbackProducts[0]);
-  const [selectedColor, setSelectedColor] = useState(fallbackProducts[0].colors[0]);
-  const [selectedSize, setSelectedSize] = useState(fallbackProducts[0].variants[0].sizes[0].name);
+  const [products, setProducts] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedColor, setSelectedColor] = useState("");
+  const [selectedSize, setSelectedSize] = useState("");
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [cart, setCart] = useState([]);
   const [delivery, setDelivery] = useState("711");
