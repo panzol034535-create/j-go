@@ -125,6 +125,19 @@ export default function JGoAppPrototype() {
   useEffect(() => {
     const loadProducts = async () => {
       setLoadingProducts(true);
+
+      const cachedProducts = localStorage.getItem("jgo_products_cache");
+      if (cachedProducts) {
+        const parsedProducts = JSON.parse(cachedProducts);
+        if (Array.isArray(parsedProducts) && parsedProducts.length > 0) {
+          setProducts(parsedProducts);
+          setSelectedProduct(parsedProducts[0]);
+          setSelectedColor(parsedProducts[0].variants?.[0]?.color || parsedProducts[0].colors?.[0] || "");
+          setSelectedSize(parsedProducts[0].variants?.[0]?.sizes?.find((size) => size.stock > 0)?.name || parsedProducts[0].variants?.[0]?.sizes?.[0]?.name || parsedProducts[0].sizes?.[0] || "");
+          setSelectedImageIndex(0);
+          setLoadingProducts(false);
+        }
+      }
       try {
         const response = await fetch(XANO_PRODUCTS_URL);
 
@@ -175,6 +188,7 @@ export default function JGoAppPrototype() {
         });
 
         if (formattedProducts.length > 0) {
+          localStorage.setItem("jgo_products_cache", JSON.stringify(formattedProducts));
           setProducts(formattedProducts);
           setSelectedProduct(formattedProducts[0]);
           setSelectedColor(formattedProducts[0].variants?.[0]?.color || formattedProducts[0].colors[0]);
@@ -347,6 +361,15 @@ export default function JGoAppPrototype() {
       return;
     }
 
+    const orderCacheKey = `jgo_orders_cache_${user.email}`;
+    const cachedOrders = localStorage.getItem(orderCacheKey);
+    if (cachedOrders) {
+      const parsedOrders = JSON.parse(cachedOrders);
+      if (Array.isArray(parsedOrders)) {
+        setOrders(parsedOrders);
+      }
+    }
+
     ordersLoadingRef.current = true;
 
     try {
@@ -398,6 +421,7 @@ export default function JGoAppPrototype() {
         })
       );
 
+      localStorage.setItem(orderCacheKey, JSON.stringify(formattedOrders));
       setOrders(formattedOrders);
     } catch (error) {
       console.error(error);
