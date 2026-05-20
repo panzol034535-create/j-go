@@ -1041,7 +1041,6 @@ export default function JGoAppPrototype() {
             icon={<Package size={20} />}
             label="訂單"
             onClick={() => {
-              if (currentUser) loadOrdersForUser(currentUser);
               setTab("orders");
             }}
           />
