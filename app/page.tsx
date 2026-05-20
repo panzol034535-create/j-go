@@ -50,8 +50,20 @@ export default function JGoAppPrototype() {
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
-  const [cart, setCart] = useState([]);
-  const [delivery, setDelivery] = useState("711");
+  const [cart, setCart] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const savedCart = localStorage.getItem("jgo_cart");
+      const parsedCart = savedCart ? JSON.parse(savedCart) : [];
+      return Array.isArray(parsedCart) ? parsedCart : [];
+    } catch {
+      return [];
+    }
+  });
+  const [delivery, setDelivery] = useState(() => {
+    if (typeof window === "undefined") return "711";
+    return localStorage.getItem("jgo_delivery") || "711";
+  });
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [authMode, setAuthMode] = useState("login");
@@ -59,10 +71,18 @@ export default function JGoAppPrototype() {
   const [authForm, setAuthForm] = useState({ name: "", email: "", phone: "", password: "" });
   const [accountForm, setAccountForm] = useState({ name: "", email: "", phone: "" });
   const [checkoutForm, setCheckoutForm] = useState({ name: "", email: "", phone: "" });
-  const [pickupStore, setPickupStore] = useState({
-    store_name: "",
-    store_id: "",
-    address: "",
+  const [pickupStore, setPickupStore] = useState(() => {
+    if (typeof window === "undefined") {
+      return { store_name: "", store_id: "", address: "" };
+    }
+    try {
+      const savedPickupStore = localStorage.getItem("jgo_pickup_store");
+      return savedPickupStore
+        ? JSON.parse(savedPickupStore)
+        : { store_name: "", store_id: "", address: "" };
+    } catch {
+      return { store_name: "", store_id: "", address: "" };
+    }
   });
   const [shippingAddress, setShippingAddress] = useState({
     city: "",
@@ -72,7 +92,6 @@ export default function JGoAppPrototype() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
-  const cartLoadedRef = React.useRef(false);
 
   const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
 
@@ -84,30 +103,9 @@ export default function JGoAppPrototype() {
       setAccountForm({ name: user.name, email: user.email, phone: user.phone });
       setCheckoutForm({ name: user.name, email: user.email, phone: user.phone });
     }
-
-    const savedCart = localStorage.getItem("jgo_cart");
-    if (savedCart) {
-      const parsedCart = JSON.parse(savedCart);
-      if (Array.isArray(parsedCart)) {
-        setCart(parsedCart);
-      }
-    }
-
-    const savedPickupStore = localStorage.getItem("jgo_pickup_store");
-    if (savedPickupStore) {
-      setPickupStore(JSON.parse(savedPickupStore));
-    }
-
-    const savedDelivery = localStorage.getItem("jgo_delivery");
-    if (savedDelivery) {
-      setDelivery(savedDelivery);
-    }
-
-    cartLoadedRef.current = true;
   }, []);
 
   useEffect(() => {
-    if (!cartLoadedRef.current) return;
     localStorage.setItem("jgo_cart", JSON.stringify(cart));
   }, [cart]);
 
