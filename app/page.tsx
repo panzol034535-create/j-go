@@ -71,6 +71,7 @@ export default function JGoAppPrototype() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const touchStartX = React.useRef(null);
+  const ordersLoadingRef = React.useRef(false);
 
   const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
 
@@ -81,7 +82,6 @@ export default function JGoAppPrototype() {
       setCurrentUser(user);
       setAccountForm({ name: user.name, email: user.email, phone: user.phone });
       setCheckoutForm({ name: user.name, email: user.email, phone: user.phone });
-      loadOrdersForUser(user);
     }
   }, []);
 
@@ -116,6 +116,12 @@ export default function JGoAppPrototype() {
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
+
+  useEffect(() => {
+    if (tab === "orders" && currentUser?.email) {
+      loadOrdersForUser(currentUser);
+    }
+  }, [tab, currentUser?.email]);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -337,10 +343,14 @@ export default function JGoAppPrototype() {
   };
 
   const loadOrdersForUser = async (user) => {
+    if (ordersLoadingRef.current) return;
+
     if (!user?.email) {
       setOrders([]);
       return;
     }
+
+    ordersLoadingRef.current = true;
 
     try {
       const response = await fetch(`${XANO_GET_ORDERS_URL}?customer_email=${encodeURIComponent(user.email)}`);
@@ -354,8 +364,10 @@ export default function JGoAppPrototype() {
 
       xanoOrders.sort((a, b) => Number(b.created_at) - Number(a.created_at));
 
+      const recentOrders = xanoOrders.slice(0, 10);
+
       const formattedOrders = await Promise.all(
-        xanoOrders.map(async (order) => {
+        recentOrders.map(async (order) => {
           let items = [];
 
           try {
@@ -392,8 +404,11 @@ export default function JGoAppPrototype() {
       setOrders(formattedOrders);
     } catch (error) {
       console.error(error);
-      alert(error.message);
-      setOrders([]);
+      if (!String(error.message || "").includes("429")) {
+        alert(error.message);
+      }
+    } finally {
+      ordersLoadingRef.current = false;
     }
   };
 
