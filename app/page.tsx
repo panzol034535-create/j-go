@@ -92,6 +92,7 @@ export default function JGoAppPrototype() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState("");
+  const isAdmin = currentUser?.email === "panzol034535@gmail.com";
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
 
@@ -1016,6 +1017,15 @@ export default function JGoAppPrototype() {
                       <Button onClick={saveAccount} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">儲存資料</Button>
                     </div>
 
+                    {isAdmin && (
+                      <Button
+                        onClick={() => setTab("admin")}
+                        className="h-12 w-full rounded-2xl bg-red-500 text-base"
+                      >
+                        管理商品
+                      </Button>
+                    )}
+
                     <Button onClick={logout} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
                       <LogOut size={18} className="mr-2" /> 登出
                     </Button>
@@ -1052,6 +1062,49 @@ export default function JGoAppPrototype() {
                   </CardContent>
                 </Card>
               )}
+            </motion.div>
+          )}
+
+          {tab === "admin" && isAdmin && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <button onClick={() => setTab("account")} className="text-sm font-bold text-neutral-500">← 返回我的帳號</button>
+              <h2 className="text-2xl font-black">商品管理</h2>
+
+              <Button
+                onClick={() => refreshProductsFromXano({ useCache: false })}
+                className="h-12 w-full rounded-2xl bg-neutral-900 text-base"
+              >
+                重新同步 Xano 商品
+              </Button>
+
+              <div className="space-y-3">
+                {products.map((product) => (
+                  <Card key={product.id} className="rounded-3xl border-neutral-100 shadow-sm">
+                    <CardContent className="space-y-3 p-4">
+                      <div className="flex items-center gap-3">
+                        <img src={product.image} alt={product.name} className="h-16 w-16 rounded-2xl object-cover" />
+                        <div className="flex-1">
+                          <p className="font-black">{product.name}</p>
+                          <p className="text-sm text-neutral-500">{product.brand}</p>
+                          <p className="text-sm font-bold">{formatPrice(product.price)}</p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl bg-neutral-50 p-3 text-xs text-neutral-600">
+                        <p className="mb-2 font-black text-neutral-900">庫存 variants</p>
+                        {product.variants?.length > 0 ? product.variants.map((variant) => (
+                          <div key={variant.color} className="mb-1">
+                            <span className="font-bold">{variant.color}：</span>
+                            {variant.sizes?.map((size) => `${size.name}(${size.stock})`).join(" / ")}
+                          </div>
+                        )) : (
+                          <p>尚未設定 variants</p>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             </motion.div>
           )}
 
