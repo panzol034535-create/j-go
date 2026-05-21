@@ -128,6 +128,7 @@ export default function JGoAppPrototype() {
 
       setPaymentMessage("付款成功，正在更新訂單...");
       setTab("payment-result");
+      refreshProductsFromXano({ useCache: false });
 
       if (savedUser) {
         const user = JSON.parse(savedUser);
@@ -639,8 +640,19 @@ export default function JGoAppPrototype() {
           }),
         });
 
+        const stockText = await stockResponse.text();
+        let stockData = null;
+
+        try {
+          stockData = stockText ? JSON.parse(stockText) : null;
+        } catch {
+          stockData = stockText;
+        }
+
+        console.log("decrease stock response", stockResponse.status, stockData);
+
         if (!stockResponse.ok) {
-          console.warn("扣庫存 API 呼叫失敗", stockResponse.status);
+          throw new Error(`扣庫存失敗：${stockResponse.status}，${stockText}`);
         }
       }
 
@@ -650,10 +662,7 @@ export default function JGoAppPrototype() {
         id: orderId || `JG-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${String(orders.length + 1).padStart(4, "0")}`,
         items: cart.map((item) => ({
           id: item.key,
-          product_name: item.name || item.produ
-      await refreshProductsFromXano({ useCache: false });
-
-      const order = {duct?.name || "JGO商品",
+          product_name: item.name || item.product_name || selectedProduct?.name || "JGO商品",
           color: item.color,
           size: item.size,
           qty: item.qty,
@@ -676,8 +685,8 @@ export default function JGoAppPrototype() {
       form.method = "POST";
       form.action = ecpayData.payment_url;
 
-      Object.entries(ecpayData).forEach(([ksaveOrderForUser(currentUser, order);
-      setCart([]);y === "merchant_trade_no") return;
+      Object.entries(ecpayData).forEach(([key, value]) => {
+        if (key === "payment_url" || key === "merchant_trade_no") return;
 
         const input = document.createElement("input");
         input.type = "hidden";
