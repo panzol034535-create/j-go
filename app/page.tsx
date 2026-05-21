@@ -41,6 +41,7 @@ const XANO_GET_ORDER_ITEMS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4
 const XANO_PRODUCTS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/products";
 const XANO_CREATE_ECPAY_ORDER_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-ecpay-order";
 const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-cvs-map";
+const XANO_DECREASE_STOCK_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/decrease-stock";
 
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
@@ -166,88 +167,110 @@ export default function JGoAppPrototype() {
     }
   }, [tab, currentUser?.email]);
 
-  useEffect(() => {
-    const loadProducts = async () => {
-      setLoadingProducts(true);
+  const formatXanoProducts = (productList) => {
+    return productList.map((product) => {
+      const images = product.images
+        ? product.images.split(",").map((url) => url.trim()).filter(Boolean)
+        : product.image
+          ? [product.image]
+          : [];
 
+      return {
+        id: product.id,
+        name: product.name,
+        brand: product.brand,
+        price: product.price,
+        compareAt: product.compare_at,
+        image: images[0] || product.image,
+        images,
+        colors: product.colors ? product.colors.split(",").map((color) => color.trim()).filter(Boolean) : [],
+        sizes: product.sizes ? product.sizes.split(",").map((size) => size.trim()).filter(Boolean) : [],
+        variants: product.variants
+          ? product.variants.split(";").map((variant) => {
+              const [color, ...sizeParts] = variant.split(":");
+              const sizeText = sizeParts.join(":");
+              return {
+                color: color?.trim(),
+                sizes: sizeText
+                  ? sizeText.split(",").map((sizeItem) => {
+                      const [sizeName, stockText] = sizeItem.split(":");
+                      return {
+                        name: sizeName?.trim(),
+                        stock: Number(stockText ?? 999),
+                      };
+                    }).filter((size) => size.name)
+                  : [],
+              };
+            })
+          : [],
+        tag: product.tag || "日本選品",
+      };
+    });
+  };
+
+  const applyProducts = (nextProducts) => {
+    if (!Array.isArray(nextProducts) || nextProducts.length === 0) return;
+
+    setProducts(nextProducts);
+    setSelectedProduct((prev) => {
+      const sameProduct = nextProducts.find((product) => product.id === prev?.id);
+      return sameProduct || nextProducts[0];
+    });
+
+    const activeProduct = nextProducts.find((product) => product.id === selectedProduct?.id) || nextProducts[0];
+    const activeVariant = activeProduct.variants?.find((variant) => variant.color === selectedColor) || activeProduct.variants?.[0];
+    const nextColor = activeVariant?.color || activeProduct.colors?.[0] || "";
+    const nextSize = activeVariant?.sizes?.find((size) => size.name === selectedSize && size.stock > 0)?.name
+      || activeVariant?.sizes?.find((size) => size.stock > 0)?.name
+      || activeVariant?.sizes?.[0]?.name
+      || activeProduct.sizes?.[0]
+      || "";
+
+    setSelectedColor(nextColor);
+    setSelectedSize(nextSize);
+    setSelectedImageIndex(0);
+  };
+
+  const refreshProductsFromXano = async ({ useCache = true } = {}) => {
+    setLoadingProducts(true);
+
+    if (useCache) {
       const cachedProducts = localStorage.getItem("jgo_products_cache");
       if (cachedProducts) {
         const parsedProducts = JSON.parse(cachedProducts);
         if (Array.isArray(parsedProducts) && parsedProducts.length > 0) {
-          setProducts(parsedProducts);
-          setSelectedProduct(parsedProducts[0]);
-          setSelectedColor(parsedProducts[0].variants?.[0]?.color || parsedProducts[0].colors?.[0] || "");
-          setSelectedSize(parsedProducts[0].variants?.[0]?.sizes?.find((size) => size.stock > 0)?.name || parsedProducts[0].variants?.[0]?.sizes?.[0]?.name || parsedProducts[0].sizes?.[0] || "");
-          setSelectedImageIndex(0);
+          applyProducts(parsedProducts);
           setLoadingProducts(false);
         }
       }
-      try {
-        const response = await fetch(XANO_PRODUCTS_URL);
+    }
 
-        if (!response.ok) {
-          throw new Error("商品 API 載入失敗");
-        }
+    try {
+      const response = await fetch(`${XANO_PRODUCTS_URL}?t=${Date.now()}`);
 
-        const data = await response.json();
-        const productList = Array.isArray(data) ? data : [];
-
-        const formattedProducts = productList.map((product) => {
-          const images = product.images
-            ? product.images.split(",").map((url) => url.trim()).filter(Boolean)
-            : product.image
-              ? [product.image]
-              : [];
-
-          return {
-            id: product.id,
-            name: product.name,
-            brand: product.brand,
-            price: product.price,
-            compareAt: product.compare_at,
-            image: images[0] || product.image,
-            images,
-            colors: product.colors ? product.colors.split(",").map((color) => color.trim()).filter(Boolean) : [],
-            sizes: product.sizes ? product.sizes.split(",").map((size) => size.trim()).filter(Boolean) : [],
-            variants: product.variants
-              ? product.variants.split(";").map((variant) => {
-                  const [color, ...sizeParts] = variant.split(":");
-                  const sizeText = sizeParts.join(":");
-                  return {
-                    color: color?.trim(),
-                    sizes: sizeText
-                      ? sizeText.split(",").map((sizeItem) => {
-                          const [sizeName, stockText] = sizeItem.split(":");
-                          return {
-                            name: sizeName?.trim(),
-                            stock: Number(stockText ?? 999),
-                          };
-                        }).filter((size) => size.name)
-                      : [],
-                  };
-                })
-              : [],
-            tag: product.tag || "日本選品",
-          };
-        });
-
-        if (formattedProducts.length > 0) {
-          localStorage.setItem("jgo_products_cache", JSON.stringify(formattedProducts));
-          setProducts(formattedProducts);
-          setSelectedProduct(formattedProducts[0]);
-          setSelectedColor(formattedProducts[0].variants?.[0]?.color || formattedProducts[0].colors[0]);
-          setSelectedSize(formattedProducts[0].variants?.[0]?.sizes?.find((size) => size.stock > 0)?.name || formattedProducts[0].variants?.[0]?.sizes?.[0]?.name || formattedProducts[0].sizes[0]);
-          setSelectedImageIndex(0);
-        }
-      } catch (error) {
-        console.error("讀取商品失敗", error);
-      } finally {
-        setLoadingProducts(false);
+      if (!response.ok) {
+        throw new Error("商品 API 載入失敗");
       }
-    };
 
-    loadProducts();
+      const data = await response.json();
+      const productList = Array.isArray(data) ? data : [];
+      const formattedProducts = formatXanoProducts(productList);
+
+      if (formattedProducts.length > 0) {
+        localStorage.setItem("jgo_products_cache", JSON.stringify(formattedProducts));
+        applyProducts(formattedProducts);
+      }
+    } catch (error) {
+      console.error("讀取商品失敗", error);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshProductsFromXano({ useCache: true });
   }, []);
+
   const shipping = subtotal > 0 ? 60 : 0;
   const total = subtotal + shipping;
 
@@ -602,13 +625,35 @@ export default function JGoAppPrototype() {
         if (!itemResponse.ok) {
           throw new Error(`新增商品明細失敗：${itemResponse.status}，${itemText}`);
         }
+
+        const stockResponse = await fetch(XANO_DECREASE_STOCK_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            product_id: item.id,
+            color: item.color,
+            size: item.size,
+            qty: item.qty,
+          }),
+        });
+
+        if (!stockResponse.ok) {
+          console.warn("扣庫存 API 呼叫失敗", stockResponse.status);
+        }
       }
+
+      await refreshProductsFromXano({ useCache: false });
 
       const order = {
         id: orderId || `JG-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${String(orders.length + 1).padStart(4, "0")}`,
         items: cart.map((item) => ({
           id: item.key,
-          product_name: item.name || item.product_name || selectedProduct?.name || "JGO商品",
+          product_name: item.name || item.produ
+      await refreshProductsFromXano({ useCache: false });
+
+      const order = {duct?.name || "JGO商品",
           color: item.color,
           size: item.size,
           qty: item.qty,
@@ -631,8 +676,8 @@ export default function JGoAppPrototype() {
       form.method = "POST";
       form.action = ecpayData.payment_url;
 
-      Object.entries(ecpayData).forEach(([key, value]) => {
-        if (key === "payment_url" || key === "merchant_trade_no") return;
+      Object.entries(ecpayData).forEach(([ksaveOrderForUser(currentUser, order);
+      setCart([]);y === "merchant_trade_no") return;
 
         const input = document.createElement("input");
         input.type = "hidden";
