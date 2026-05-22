@@ -850,16 +850,85 @@ export default function JGoAppPrototype() {
               </div>
             ) : (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-              <section className="rounded-3xl bg-neutral-900 p-6 text-white">
-                <p className="mb-2 text-sm text-neutral-300">日系男裝 × 中性穿搭 × 整套買</p>
-                <h2 className="text-3xl font-black leading-tight">日本選品，透明價格，快速預購。</h2>
-                <Button onClick={() => setTab("shop")} className="mt-5 rounded-2xl bg-white text-neutral-900 hover:bg-neutral-100">開始逛商品</Button>
+              <section className="relative overflow-hidden rounded-[2rem] bg-neutral-950 p-6 text-white">
+                <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-white/10 blur-2xl" />
+                <div className="absolute -bottom-12 left-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
+                <div className="relative z-10 space-y-4">
+                  <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-black tracking-widest text-neutral-200">
+                    AI LOOKBOOK × JAPAN SELECT
+                  </span>
+                  <div>
+                    <p className="mb-2 text-sm text-neutral-300">日系男裝・女性穿搭・中性整套買</p>
+                    <h2 className="text-4xl font-black leading-tight tracking-tight">用 AI Lookbook 找到你的整套日系穿搭。</h2>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={() => setTab("lookbook")} className="rounded-2xl bg-white text-neutral-900 hover:bg-neutral-100">
+                      看穿搭
+                    </Button>
+                    <Button onClick={() => setTab("shop")} className="rounded-2xl bg-white/10 text-white hover:bg-white/20">
+                      逛商品
+                    </Button>
+                  </div>
+                </div>
               </section>
+
+              <section className="grid grid-cols-3 gap-2">
+                {[
+                  { key: "male", label: "MEN", sub: "男性" },
+                  { key: "female", label: "WOMEN", sub: "女性" },
+                  { key: "unisex", label: "UNISEX", sub: "中性" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => {
+                      setActiveGender(item.key);
+                      setTab("lookbook");
+                    }}
+                    className="rounded-3xl border border-neutral-100 bg-neutral-50 p-4 text-left transition hover:bg-neutral-100"
+                  >
+                    <p className="text-lg font-black">{item.label}</p>
+                    <p className="text-xs font-bold text-neutral-400">{item.sub}穿搭</p>
+                  </button>
+                ))}
+              </section>
+
+              {lookbooks.length > 0 && (
+                <section>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-black text-neutral-400">STYLE FEED</p>
+                      <h3 className="text-lg font-black">AI 穿搭靈感</h3>
+                    </div>
+                    <button onClick={() => setTab("lookbook")} className="text-sm font-bold text-neutral-500">看全部</button>
+                  </div>
+                  <div className="flex gap-3 overflow-x-auto pb-2">
+                    {lookbooks.slice(0, 4).map((lookbook) => (
+                      <button
+                        key={lookbook.id}
+                        onClick={() => {
+                          setSelectedLookbook(lookbook);
+                          setTab("lookbook-detail");
+                        }}
+                        className="min-w-[190px] overflow-hidden rounded-[1.75rem] bg-neutral-100 text-left shadow-sm"
+                      >
+                        <img src={lookbook.image} alt={lookbook.title} className="h-64 w-full object-cover" />
+                        <div className="p-3">
+                          <span className="rounded-full bg-white px-2 py-1 text-[10px] font-black text-neutral-600">{lookbook.tag}</span>
+                          <p className="mt-2 line-clamp-2 font-black leading-tight">{lookbook.title}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <section>
                 <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-lg font-bold">本週推薦</h3>
-                  <button onClick={() => setTab("shop")} className="text-sm text-neutral-500">看全部</button>
+                  <div>
+                    <p className="text-xs font-black text-neutral-400">SHOP THE LOOK</p>
+                    <h3 className="text-lg font-black">本週推薦商品</h3>
+                  </div>
+                  <button onClick={() => setTab("shop")} className="text-sm font-bold text-neutral-500">看全部</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   {products
@@ -868,7 +937,7 @@ export default function JGoAppPrototype() {
                       if (activeGender === "unisex") return product.gender === "unisex";
                       return product.gender === activeGender || product.gender === "unisex";
                     })
-                    .slice(0, 2)
+                    .slice(0, 4)
                     .map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
                 </div>
               </section>
