@@ -94,7 +94,7 @@ export default function JGoAppPrototype() {
     address: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+  const [paymentMessage, setPaymentMessage] = useState("");
   const [lookbookForm, setLookbookForm] = useState({
     title: "",
     image: "",
@@ -285,7 +285,30 @@ export default function JGoAppPrototype() {
 
   const loadLookbooks = async () => {
     try {
-      const (!isAdmin) return;
+      const response = await fetch(`${XANO_LOOKBOOKS_URL}?t=${Date.now()}`);
+      if (!response.ok) throw new Error(`讀取 Lookbook 失敗：${response.status}`);
+
+      const data = await response.json();
+      const list = Array.isArray(data) ? data : data?.items || [];
+
+      setLookbooks(list.map((lookbook) => ({
+        id: lookbook.id,
+        title: lookbook.title || "J-GO Lookbook",
+        image: lookbook.image,
+        tag: lookbook.tag || lookbook.style_tag || "AI LOOKBOOK",
+        product_ids: String(lookbook.product_ids || "")
+          .split(",")
+          .map((id) => Number(id.trim()))
+          .filter(Boolean),
+        raw_product_ids: lookbook.product_ids || "",
+      })));
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const createLookbook = async () => {
+    if (!isAdmin) return;
     if (!lookbookForm.title || !lookbookForm.image || !lookbookForm.product_ids) {
       alert("請填寫 title、image、product_ids");
       return;
