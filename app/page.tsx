@@ -46,6 +46,8 @@ const XANO_LOOKBOOKS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookb
 const XANO_UPDATE_ORDER_SHIPPING_STATUS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-order-shipping-status";
 const XANO_ADMIN_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-orders";
 const XANO_ADMIN_CREATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-create-product";
+const XANO_ADMIN_UPDATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-update-product";
+const XANO_ADMIN_DELETE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-delete-product";
 
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
@@ -123,6 +125,7 @@ export default function JGoAppPrototype() {
     gender: "unisex",
     tag: "日本選品",
   });
+  const [editingProductId, setEditingProductId] = useState(null);
   const isAdmin = currentUser?.email === "panzol034535@gmail.com";
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
@@ -407,6 +410,46 @@ export default function JGoAppPrototype() {
     }
   };
 
+  const resetProductForm = () => {
+    setProductForm({
+      name: "",
+      brand: "",
+      price: "",
+      compare_at: "",
+      image: "",
+      images: "",
+      colors: "",
+      sizes: "",
+      variants: "",
+      gender: "unisex",
+      tag: "日本選品",
+    });
+    setEditingProductId(null);
+  };
+
+  const productVariantsToText = (product) => {
+    return (product.variants || [])
+      .map((variant) => `${variant.color}:${(variant.sizes || []).map((size) => `${size.name}:${size.stock}`).join(",")}`)
+      .join(";");
+  };
+
+  const startEditProduct = (product) => {
+    setEditingProductId(product.id);
+    setProductForm({
+      name: product.name || "",
+      brand: product.brand || "",
+      price: String(product.price || ""),
+      compare_at: String(product.compareAt || product.price || ""),
+      image: product.image || "",
+      images: (product.images || []).join(","),
+      colors: (product.colors || []).join(","),
+      sizes: (product.sizes || []).join(","),
+      variants: productVariantsToText(product),
+      gender: product.gender || "unisex",
+      tag: product.tag || "日本選品",
+    });
+  };
+
   const createProduct = async () => {
     if (!isAdmin) return;
 
@@ -416,48 +459,66 @@ export default function JGoAppPrototype() {
     }
 
     try {
-      const response = await fetch(XANO_ADMIN_CREATE_PRODUCT_URL, {
+      const payload = {
+        product_id: editingProductId,
+        name: productForm.name,
+        brand: productForm.brand,
+        price: Number(productForm.price),
+        compare_at: Number(productForm.compare_at || productForm.price),
+        image: productForm.image,
+        images: productForm.images || productForm.image,
+        colors: productForm.colors,
+        sizes: productForm.sizes,
+        variants: productForm.variants,
+        gender: productForm.gender,
+        tag: productForm.tag || "日本選品",
+      };
+
+      const response = await fetch(editingProductId ? XANO_ADMIN_UPDATE_PRODUCT_URL : XANO_ADMIN_CREATE_PRODUCT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: productForm.name,
-          brand: productForm.brand,
-          price: Number(productForm.price),
-          compare_at: Number(productForm.compare_at || productForm.price),
-          image: productForm.image,
-          images: productForm.images || productForm.image,
-          colors: productForm.colors,
-          sizes: productForm.sizes,
-          variants: productForm.variants,
-          gender: productForm.gender,
-          tag: productForm.tag || "日本選品",
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(`新增商品失敗：${response.status}，${text}`);
+        throw new Error(`${editingProductId ? "更新" : "新增"}商品失敗：${response.status}，${text}`);
       }
 
-      setProductForm({
-        name: "",
-        brand: "",
-        price: "",
-        compare_at: "",
-        image: "",
-        images: "",
-        colors: "",
-        sizes: "",
-        variants: "",
-        gender: "unisex",
-        tag: "日本選品",
-      });
-
+      resetProductForm();
       await refreshProductsFromXano({ useCache: false });
-      alert("商品已新增");
+      alert(editingProductId ? "商品已更新" : "商品已新增");
     } catch (error) {
       console.error(error);
-      alert(error.message || "新增商品失敗");
+      alert(error.message || `${editingProductId ? "更新" : "新增"}商品失敗`);
+    }
+  };
+
+  const deleteProduct = async (productId) => {
+    if (!isAdmin) return;
+    if (!confirm("確定要刪除這個商品嗎？刪除後前台會看不到。")) return;
+
+    try {
+      const response = await fetch(XANO_ADMIN_DELETE_PRODUCT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product_id: productId }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`刪除商品失敗：${response.status}，${text}`);
+      }
+
+      if (selectedProduct?.id === productId) {
+        setSelectedProduct(null);
+      }
+
+      await refreshProductsFromXano({ useCache: false });
+      alert("商品已刪除");
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "刪除商品失敗");
     }
   };
 
@@ -1876,7 +1937,7 @@ export default function JGoAppPrototype() {
 
               <Card className="rounded-3xl border-neutral-100 shadow-sm">
                 <CardContent className="space-y-3 p-4">
-                  <h3 className="font-black">新增商品</h3>
+                  <h3 className="font-black">{editingProductId ? "編輯商品" : "新增商品"}</h3>
                   <Input label="商品名稱" placeholder="日系寬版襯衫" value={productForm.name} onChange={(value) => setProductForm({ ...productForm, name: value })} />
                   <Input label="品牌" placeholder="J-GO SELECT" value={productForm.brand} onChange={(value) => setProductForm({ ...productForm, brand: value })} />
                   <div className="grid grid-cols-2 gap-3">
@@ -1903,9 +1964,16 @@ export default function JGoAppPrototype() {
                     </label>
                     <Input label="Tag" placeholder="日本選品" value={productForm.tag} onChange={(value) => setProductForm({ ...productForm, tag: value })} />
                   </div>
-                  <Button onClick={createProduct} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
-                    新增商品
-                  </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button onClick={createProduct} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
+                      {editingProductId ? "更新商品" : "新增商品"}
+                    </Button>
+                    {editingProductId && (
+                      <Button onClick={resetProductForm} className="h-12 w-full rounded-2xl bg-neutral-200 text-neutral-900 text-base">
+                        取消編輯
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 
@@ -1939,6 +2007,15 @@ export default function JGoAppPrototype() {
                         )) : (
                           <p>尚未設定 variants</p>
                         )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button onClick={() => startEditProduct(product)} className="h-10 rounded-2xl bg-neutral-900 text-sm">
+                          編輯
+                        </Button>
+                        <Button onClick={() => deleteProduct(product.id)} className="h-10 rounded-2xl bg-red-100 text-sm text-red-600">
+                          刪除
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>
