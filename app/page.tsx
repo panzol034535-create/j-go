@@ -864,72 +864,107 @@ export default function JGoAppPrototype() {
                 商品載入中...
               </div>
             ) : (
-            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-              <section className="relative overflow-hidden rounded-[2rem] bg-neutral-950 p-6 text-white">
-                <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-white/10 blur-2xl" />
-                <div className="absolute -bottom-12 left-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
-                <div className="relative z-10 space-y-4">
-                  <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-black tracking-widest text-neutral-200">
-                    AI LOOKBOOK × JAPAN SELECT
-                  </span>
-                  <div>
-                    <p className="mb-2 text-sm text-neutral-300">日系男裝・女性穿搭・中性整套買</p>
-                    <h2 className="text-4xl font-black leading-tight tracking-tight">用 AI Lookbook 找到你的整套日系穿搭。</h2>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-7">
+              <section className="relative overflow-hidden rounded-[2.25rem] bg-neutral-950 text-white shadow-2xl">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_36%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.12),transparent_32%)]" />
+                <div className="grid gap-5 p-6">
+                  <div className="relative z-10 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-[11px] font-black tracking-[0.18em] text-neutral-200 backdrop-blur">
+                        J-GO AI LOOKBOOK
+                      </span>
+                      <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-neutral-900">BETA</span>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-sm font-bold text-neutral-300">日本選品 × AI 穿搭靈感</p>
+                      <h2 className="text-[2.65rem] font-black leading-[0.95] tracking-tight">
+                        一張圖，買完整套日系穿搭。
+                      </h2>
+                    </div>
+                    <p className="max-w-xs text-sm leading-6 text-neutral-300">
+                      用 AI Lookbook 找風格，點進去直接看襯衫、褲子、外套與配件。
+                    </p>
+                    <div className="flex gap-2">
+                      <Button onClick={() => setTab("lookbook")} className="h-11 rounded-2xl bg-white px-5 text-neutral-900 hover:bg-neutral-100">
+                        探索穿搭
+                      </Button>
+                      <Button onClick={() => setTab("shop")} className="h-11 rounded-2xl bg-white/10 px-5 text-white hover:bg-white/20">
+                        逛商品
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button onClick={() => setTab("lookbook")} className="rounded-2xl bg-white text-neutral-900 hover:bg-neutral-100">
-                      看穿搭
-                    </Button>
-                    <Button onClick={() => setTab("shop")} className="rounded-2xl bg-white/10 text-white hover:bg-white/20">
-                      逛商品
-                    </Button>
+
+                  <div className="relative z-10 grid grid-cols-3 gap-2 rounded-[1.5rem] bg-white/10 p-2 backdrop-blur">
+                    {[
+                      { label: "LOOKS", value: lookbooks.length },
+                      { label: "ITEMS", value: products.length },
+                      { label: "STYLE", value: "JP" },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-2xl bg-white/10 p-3 text-center">
+                        <p className="text-lg font-black">{item.value}</p>
+                        <p className="text-[10px] font-black tracking-widest text-neutral-300">{item.label}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </section>
 
-              <section className="grid grid-cols-3 gap-2">
-                {[
-                  { key: "male", label: "MEN", sub: "男性" },
-                  { key: "female", label: "WOMEN", sub: "女性" },
-                  { key: "unisex", label: "UNISEX", sub: "中性" },
-                ].map((item) => (
-                  <button
-                    key={item.key}
-                    onClick={() => {
-                      setActiveGender(item.key);
-                      setTab("lookbook");
-                    }}
-                    className="rounded-3xl border border-neutral-100 bg-neutral-50 p-4 text-left transition hover:bg-neutral-100"
-                  >
-                    <p className="text-lg font-black">{item.label}</p>
-                    <p className="text-xs font-bold text-neutral-400">{item.sub}穿搭</p>
-                  </button>
-                ))}
+              <section>
+                <div className="mb-3 flex items-end justify-between">
+                  <div>
+                    <p className="text-xs font-black tracking-widest text-neutral-400">SHOP BY STYLE</p>
+                    <h3 className="text-xl font-black">選你的穿搭方向</h3>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { key: "male", label: "MEN", sub: "男生日系", tone: "bg-neutral-900 text-white" },
+                    { key: "female", label: "WOMEN", sub: "女生穿搭", tone: "bg-neutral-100 text-neutral-900" },
+                    { key: "unisex", label: "UNISEX", sub: "中性寬鬆", tone: "bg-stone-100 text-neutral-900" },
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      onClick={() => {
+                        setActiveGender(item.key);
+                        setTab("lookbook");
+                      }}
+                      className={`rounded-[1.6rem] p-4 text-left shadow-sm transition active:scale-[0.98] ${item.tone}`}
+                    >
+                      <p className="text-lg font-black tracking-tight">{item.label}</p>
+                      <p className="mt-1 text-[11px] font-bold opacity-70">{item.sub}</p>
+                    </button>
+                  ))}
+                </div>
               </section>
 
               {lookbooks.length > 0 && (
                 <section>
                   <div className="mb-3 flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-black text-neutral-400">STYLE FEED</p>
-                      <h3 className="text-lg font-black">AI 穿搭靈感</h3>
+                      <p className="text-xs font-black tracking-widest text-neutral-400">STYLE FEED</p>
+                      <h3 className="text-xl font-black">AI 穿搭靈感</h3>
                     </div>
-                    <button onClick={() => setTab("lookbook")} className="text-sm font-bold text-neutral-500">看全部</button>
+                    <button onClick={() => setTab("lookbook")} className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600">看全部</button>
                   </div>
-                  <div className="flex gap-3 overflow-x-auto pb-2">
-                    {lookbooks.slice(0, 4).map((lookbook) => (
+                  <div className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {lookbooks.slice(0, 5).map((lookbook, index) => (
                       <button
                         key={lookbook.id}
                         onClick={() => {
                           setSelectedLookbook(lookbook);
                           setTab("lookbook-detail");
                         }}
-                        className="min-w-[190px] overflow-hidden rounded-[1.75rem] bg-neutral-100 text-left shadow-sm"
+                        className="group min-w-[210px] overflow-hidden rounded-[2rem] bg-neutral-100 text-left shadow-sm transition active:scale-[0.99]"
                       >
-                        <img src={lookbook.image} alt={lookbook.title} className="h-64 w-full object-cover" />
-                        <div className="p-3">
+                        <div className="relative">
+                          <img src={lookbook.image} alt={lookbook.title} className="h-72 w-full object-cover transition duration-500 group-hover:scale-105" />
+                          <div className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-[10px] font-black text-neutral-700 backdrop-blur">
+                            #{String(index + 1).padStart(2, "0")}
+                          </div>
+                        </div>
+                        <div className="space-y-2 p-3">
                           <span className="rounded-full bg-white px-2 py-1 text-[10px] font-black text-neutral-600">{lookbook.tag}</span>
-                          <p className="mt-2 line-clamp-2 font-black leading-tight">{lookbook.title}</p>
+                          <p className="line-clamp-2 font-black leading-tight">{lookbook.title}</p>
                         </div>
                       </button>
                     ))}
@@ -940,10 +975,10 @@ export default function JGoAppPrototype() {
               <section>
                 <div className="mb-3 flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-black text-neutral-400">SHOP THE LOOK</p>
-                    <h3 className="text-lg font-black">本週推薦商品</h3>
+                    <p className="text-xs font-black tracking-widest text-neutral-400">SHOP THE LOOK</p>
+                    <h3 className="text-xl font-black">本週推薦商品</h3>
                   </div>
-                  <button onClick={() => setTab("shop")} className="text-sm font-bold text-neutral-500">看全部</button>
+                  <button onClick={() => setTab("shop")} className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600">看全部</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   {filteredProducts
