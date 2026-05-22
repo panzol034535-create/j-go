@@ -43,6 +43,7 @@ const XANO_CREATE_ECPAY_ORDER_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32
 const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-cvs-map";
 const XANO_DECREASE_STOCK_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/decrease-stock";
 const XANO_LOOKBOOKS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
+const XANO_UPDATE_ORDER_SHIPPING_STATUS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-order-shipping-status";
 
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
@@ -635,6 +636,8 @@ export default function JGoAppPrototype() {
               address: order.home_address || "",
             },
             status: order.payment_status || "Pending",
+            shippingStatus: order.shipping_status || (order.payment_status === "Paid" ? "待出貨" : "未付款"),
+            trackingNo: order.tracking_no || "",
             createdAt: order.created_at ? new Date(Number(order.created_at)).toLocaleString("zh-TW") : ""
           };
         })
@@ -649,6 +652,33 @@ export default function JGoAppPrototype() {
       }
     } finally {
       ordersLoadingRef.current = false;
+    }
+  };
+
+  const updateOrderShippingStatus = async (orderId, nextStatus) => {
+    if (!isAdmin) return;
+
+    try {
+      const response = await fetch(XANO_UPDATE_ORDER_SHIPPING_STATUS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_id: orderId,
+          shipping_status: nextStatus,
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`更新出貨狀態失敗：${response.status}，${text}`);
+      }
+
+      setOrders((prev) => prev.map((order) => order.id === orderId ? { ...order, shippingStatus: nextStatus } : order));
+      setSelectedOrder((prev) => prev?.id === orderId ? { ...prev, shippingStatus: nextStatus } : prev);
+      alert(`訂單已更新為：${nextStatus}`);
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "更新出貨狀態失敗");
     }
   };
 
@@ -825,6 +855,8 @@ export default function JGoAppPrototype() {
         pickupStore,
         shippingAddress,
         status: data.payment_status || "Pending",
+        shippingStatus: "待出貨",
+        trackingNo: "",
         createdAt: new Date().toLocaleString("zh-TW"),
       };
 
@@ -1680,7 +1712,10 @@ export default function JGoAppPrototype() {
                         <p className="font-black">{order.id}</p>
                         <p className="text-xs text-neutral-500">{order.createdAt}</p>
                       </div>
-                      <span className="rounded-full bg-yellow-100 px-3 py-1 text-xs font-bold text-yellow-700">{order.status}</span>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${order.status === "Paid" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>{order.status}</span>
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${order.shippingStatus === "已出貨" ? "bg-blue-100 text-blue-700" : "bg-neutral-100 text-neutral-600"}`}>{order.shippingStatus}</span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-neutral-600"><Package size={16} /> {order.items.length} 件商品</div>
                     {order.items.length > 0 && (
@@ -1705,6 +1740,28 @@ export default function JGoAppPrototype() {
                         <p className="pl-6 text-xs text-neutral-500">{order.shippingAddress.city}{order.shippingAddress.district}{order.shippingAddress.address}</p>
                       )}
                     </div>
+                    {isAdmin && order.status === "Paid" && (
+                      <div className="grid grid-cols-2 gap-2 border-t pt-3">
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            updateOrderShippingStatus(order.id, "待出貨");
+                          }}
+                          className="rounded-2xl bg-neutral-100 px-3 py-2 text-xs font-black text-neutral-700"
+                        >
+                          待出貨
+                        </button>
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            updateOrderShippingStatus(order.id, "已出貨");
+                          }}
+                          className="rounded-2xl bg-blue-600 px-3 py-2 text-xs font-black text-white"
+                        >
+                          已出貨
+                        </button>
+                      </div>
+                    )}
                     <div className="border-t pt-3 text-right font-black">{formatPrice(order.total)}</div>
                   </CardContent>
                 </Card>
@@ -1725,9 +1782,14 @@ export default function JGoAppPrototype() {
                       <h2 className="text-2xl font-black">#{selectedOrder.id}</h2>
                       <p className="mt-1 text-xs text-neutral-500">{selectedOrder.createdAt}</p>
                     </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${selectedOrder.status === "Paid" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>
-                      {selectedOrder.status}
-                    </span>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${selectedOrder.status === "Paid" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>
+                        {selectedOrder.status}
+                      </span>
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${selectedOrder.shippingStatus === "已出貨" ? "bg-blue-100 text-blue-700" : "bg-neutral-100 text-neutral-600"}`}>
+                        {selectedOrder.shippingStatus}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="rounded-3xl bg-neutral-50 p-4">
@@ -1746,6 +1808,18 @@ export default function JGoAppPrototype() {
                         <p className="text-sm text-neutral-500">目前沒有商品明細</p>
                       )}
                     </div>
+                  </div>
+
+                  <div className="rounded-3xl bg-neutral-50 p-4">
+                    <h3 className="mb-3 font-black">出貨狀態</h3>
+                    <p className="text-sm font-bold text-neutral-700">{selectedOrder.shippingStatus}</p>
+                    {selectedOrder.trackingNo && <p className="mt-1 text-sm text-neutral-500">追蹤碼：{selectedOrder.trackingNo}</p>}
+                    {isAdmin && selectedOrder.status === "Paid" && (
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <Button onClick={() => updateOrderShippingStatus(selectedOrder.id, "待出貨")} className="rounded-2xl bg-neutral-200 text-neutral-900">待出貨</Button>
+                        <Button onClick={() => updateOrderShippingStatus(selectedOrder.id, "已出貨")} className="rounded-2xl bg-blue-600 text-white">已出貨</Button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-3xl bg-neutral-50 p-4">
