@@ -3,7 +3,7 @@
 
 import React, { useMemo, useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut } from "lucide-react";
+import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles } from "lucide-react";
 
 function Button({ children, onClick, className = "" }) {
   const hasColorOverride = className.includes("text-neutral") || className.includes("text-black") || className.includes("text-white");
@@ -42,10 +42,13 @@ const XANO_PRODUCTS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/produc
 const XANO_CREATE_ECPAY_ORDER_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-ecpay-order";
 const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-cvs-map";
 const XANO_DECREASE_STOCK_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/decrease-stock";
+const XANO_LOOKBOOKS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
 
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
   const [products, setProducts] = useState([]);
+  const [lookbooks, setLookbooks] = useState([]);
+  const [selectedLookbook, setSelectedLookbook] = useState(null);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedColor, setSelectedColor] = useState("");
@@ -271,7 +274,31 @@ export default function JGoAppPrototype() {
 
   useEffect(() => {
     refreshProductsFromXano({ useCache: true });
+    loadLookbooks();
   }, []);
+
+  const loadLookbooks = async () => {
+    try {
+      const response = await fetch(`${XANO_LOOKBOOKS_URL}?t=${Date.now()}`);
+      if (!response.ok) throw new Error(`讀取 Lookbook 失敗：${response.status}`);
+
+      const data = await response.json();
+      const list = Array.isArray(data) ? data : data?.items || [];
+
+      setLookbooks(list.map((lookbook) => ({
+        id: lookbook.id,
+        title: lookbook.title || "J-GO Lookbook",
+        image: lookbook.image,
+        tag: lookbook.tag || lookbook.style_tag || "AI LOOKBOOK",
+        product_ids: String(lookbook.product_ids || "")
+          .split(",")
+          .map((id) => Number(id.trim()))
+          .filter(Boolean),
+      })));
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
   const shipping = subtotal > 0 ? 60 : 0;
   const total = subtotal + shipping;
@@ -752,6 +779,88 @@ export default function JGoAppPrototype() {
               </section>
             </motion.div>
             )
+          )}
+
+          {tab === "lookbook" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-bold text-neutral-400">AI STYLE INSPIRATION</p>
+                  <h2 className="text-2xl font-black">AI LOOKBOOK</h2>
+                </div>
+                <Button onClick={loadLookbooks} className="rounded-2xl bg-neutral-900 text-sm">刷新</Button>
+              </div>
+
+              {lookbooks.length === 0 ? (
+                <div className="rounded-3xl bg-neutral-50 p-8 text-center">
+                  <Sparkles className="mx-auto mb-3 text-neutral-400" size={36} />
+                  <h3 className="font-black">目前沒有 Lookbook</h3>
+                  <p className="mt-1 text-sm text-neutral-500">先到 Xano 新增 AI 穿搭圖片。</p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {lookbooks.map((lookbook) => {
+                    const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
+
+                    return (
+                      <Card key={lookbook.id} className="overflow-hidden rounded-[2rem] border-neutral-100 shadow-sm">
+                        <button
+                          onClick={() => {
+                            setSelectedLookbook(lookbook);
+                            setTab("lookbook-detail");
+                          }}
+                          className="block w-full text-left"
+                        >
+                          <img src={lookbook.image} alt={lookbook.title} className="h-[520px] w-full object-cover" />
+                          <CardContent className="space-y-3 p-4">
+                            <div>
+                              <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-600">{lookbook.tag}</span>
+                              <h3 className="mt-3 text-xl font-black">{lookbook.title}</h3>
+                            </div>
+                            {relatedProducts.length > 0 && (
+                              <div className="flex gap-2 overflow-x-auto pb-1">
+                                {relatedProducts.map((product) => (
+                                  <div key={product.id} className="flex min-w-[150px] items-center gap-2 rounded-2xl bg-neutral-50 p-2">
+                                    <img src={product.image} alt={product.name} className="h-12 w-12 rounded-xl object-cover" />
+                                    <div>
+                                      <p className="line-clamp-1 text-xs font-bold">{product.name}</p>
+                                      <p className="text-xs font-black">{formatPrice(product.price)}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </CardContent>
+                        </button>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {tab === "lookbook-detail" && selectedLookbook && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <button onClick={() => setTab("lookbook")} className="text-sm font-bold text-neutral-500">← 返回 LOOKBOOK</button>
+              <div className="overflow-hidden rounded-[2rem] bg-neutral-100">
+                <img src={selectedLookbook.image} alt={selectedLookbook.title} className="h-[560px] w-full object-cover" />
+              </div>
+              <div>
+                <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-600">{selectedLookbook.tag}</span>
+                <h2 className="mt-3 text-2xl font-black">{selectedLookbook.title}</h2>
+              </div>
+              <section>
+                <h3 className="mb-3 text-lg font-black">這套穿搭商品</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {products
+                    .filter((product) => selectedLookbook.product_ids.includes(Number(product.id)))
+                    .map((product) => (
+                      <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />
+                    ))}
+                </div>
+              </section>
+            </motion.div>
           )}
 
           {tab === "shop" && (
@@ -1243,8 +1352,9 @@ export default function JGoAppPrototype() {
           )}
         </main>
 
-        <nav className="sticky bottom-0 grid grid-cols-4 border-t bg-white px-3 py-2">
+        <nav className="sticky bottom-0 grid grid-cols-5 border-t bg-white px-2 py-2">
           <NavButton active={tab === "home"} icon={<Home size={20} />} label="首頁" onClick={() => setTab("home")} />
+          <NavButton active={tab === "lookbook" || tab === "lookbook-detail"} icon={<Sparkles size={20} />} label="穿搭" onClick={() => setTab("lookbook")} />
           <NavButton active={tab === "shop"} icon={<Search size={20} />} label="商品" onClick={() => setTab("shop")} />
           <NavButton active={tab === "cart"} icon={<ShoppingBag size={20} />} label="購物車" onClick={() => setTab("cart")} />
           <NavButton
