@@ -105,6 +105,7 @@ export default function JGoAppPrototype() {
     product_ids: "",
   });
   const [editingLookbookId, setEditingLookbookId] = useState(null);
+  const [sizeAI, setSizeAI] = useState({ height: "", weight: "" });
   const isAdmin = currentUser?.email === "panzol034535@gmail.com";
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
@@ -471,6 +472,18 @@ export default function JGoAppPrototype() {
 
   const availableSizes = availableSizeOptions.map((size) => size.name);
   const selectedSizeStock = availableSizeOptions.find((size) => size.name === selectedSize)?.stock ?? 999;
+
+  const recommendedSize = useMemo(() => {
+    const height = Number(sizeAI.height);
+    const weight = Number(sizeAI.weight);
+
+    if (!height || !weight) return "";
+
+    if (height < 165 && weight < 55) return "S";
+    if (height < 175 && weight < 72) return "M";
+    if (height < 183 && weight < 85) return "L";
+    return "XL";
+  }, [sizeAI]);
 
   const goToPrevImage = () => {
     if (productImages.length <= 1) return;
@@ -1194,6 +1207,45 @@ export default function JGoAppPrototype() {
               {selectedSize && selectedSizeStock <= 0 && (
                 <p className="text-sm font-bold text-red-500">此尺寸目前缺貨</p>
               )}
+              <Card className="rounded-3xl border-neutral-100 bg-neutral-50 shadow-sm">
+                <CardContent className="space-y-4 p-4">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={18} className="text-neutral-500" />
+                    <h3 className="font-black">AI 智能尺寸推薦</h3>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input
+                      label="身高"
+                      placeholder="175"
+                      value={sizeAI.height}
+                      onChange={(value) => setSizeAI({ ...sizeAI, height: value })}
+                    />
+                    <Input
+                      label="體重"
+                      placeholder="68"
+                      value={sizeAI.weight}
+                      onChange={(value) => setSizeAI({ ...sizeAI, weight: value })}
+                    />
+                  </div>
+
+                  {recommendedSize && (
+                    <div className="rounded-2xl bg-neutral-900 p-4 text-white">
+                      <p className="text-xs font-bold text-neutral-300">AI 推薦尺寸</p>
+                      <div className="mt-2 flex items-center justify-between">
+                        <p className="text-3xl font-black">{recommendedSize}</p>
+                        <button
+                          onClick={() => setSelectedSize(recommendedSize)}
+                          className="rounded-2xl bg-white px-4 py-2 text-sm font-black text-neutral-900"
+                        >
+                          使用推薦尺寸
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               <Button onClick={addToCart} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">加入購物車</Button>
               {!currentUser && <p className="text-center text-sm text-neutral-400">登入後才能加入購物車與結帳</p>}
             </motion.div>
