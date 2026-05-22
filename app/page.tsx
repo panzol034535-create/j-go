@@ -1760,28 +1760,6 @@ export default function JGoAppPrototype() {
                         <p className="pl-6 text-xs text-neutral-500">{order.shippingAddress.city}{order.shippingAddress.district}{order.shippingAddress.address}</p>
                       )}
                     </div>
-                    {isAdmin && order.status === "Paid" && (
-                      <div className="grid grid-cols-2 gap-2 border-t pt-3">
-                        <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            updateOrderShippingStatus(order.id, "待出貨");
-                          }}
-                          className="rounded-2xl bg-neutral-100 px-3 py-2 text-xs font-black text-neutral-700"
-                        >
-                          待出貨
-                        </button>
-                        <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            updateOrderShippingStatus(order.id, "已出貨");
-                          }}
-                          className="rounded-2xl bg-blue-600 px-3 py-2 text-xs font-black text-white"
-                        >
-                          已出貨
-                        </button>
-                      </div>
-                    )}
                     <div className="border-t pt-3 text-right font-black">{formatPrice(order.total)}</div>
                   </CardContent>
                 </Card>
@@ -1834,13 +1812,7 @@ export default function JGoAppPrototype() {
                     <h3 className="mb-3 font-black">出貨狀態</h3>
                     <p className="text-sm font-bold text-neutral-700">{selectedOrder.shippingStatus}</p>
                     {selectedOrder.trackingNo && <p className="mt-1 text-sm text-neutral-500">追蹤碼：{selectedOrder.trackingNo}</p>}
-                    {isAdmin && selectedOrder.status === "Paid" && (
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        <Button onClick={() => updateOrderShippingStatus(selectedOrder.id, "待出貨")} className="rounded-2xl bg-neutral-200 text-neutral-900">待出貨</Button>
-                        <Button onClick={() => updateOrderShippingStatus(selectedOrder.id, "已出貨")} className="rounded-2xl bg-blue-600 text-white">已出貨</Button>
-                      </div>
-                    )}
-                  </div>
+                    </div>
 
                   <div className="rounded-3xl bg-neutral-50 p-4">
                     <h3 className="mb-3 font-black">配送資訊</h3>
