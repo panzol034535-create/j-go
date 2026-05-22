@@ -44,6 +44,7 @@ const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/
 const XANO_DECREASE_STOCK_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/decrease-stock";
 const XANO_LOOKBOOKS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
 const XANO_UPDATE_ORDER_SHIPPING_STATUS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-order-shipping-status";
+const XANO_ADMIN_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-orders";
 
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
@@ -653,6 +654,74 @@ export default function JGoAppPrototype() {
       }
     } finally {
       ordersLoadingRef.current = false;
+    }
+  };
+
+  const loadAllOrdersForAdmin = async () => {
+    if (!isAdmin) return;
+
+    try {
+      const response = await fetch(`${XANO_ADMIN_ORDERS_URL}?t=${Date.now()}`);
+
+      if (!response.ok) {
+        throw new Error(`讀取全部訂單失敗：${response.status}`);
+      }
+
+      const data = await response.json();
+      const allOrders = Array.isArray(data.orders)
+        ? data.orders
+        : Array.isArray(data)
+          ? data
+          : [];
+
+      const formattedOrders = await Promise.all(
+        allOrders.map(async (order) => {
+          let items = [];
+
+          try {
+            const itemsResponse = await fetch(`${XANO_GET_ORDER_ITEMS_URL}?order_id=${order.id}`);
+
+            if (itemsResponse.ok) {
+              const itemsData = await itemsResponse.json();
+              items = Array.isArray(itemsData) ? itemsData : itemsData?.items || [];
+            }
+          } catch (error) {
+            console.error("讀取訂單商品失敗", error);
+          }
+
+          return {
+            id: order.id,
+            items,
+            total: order.total_price || 0,
+            delivery: order.delivery_method || "711",
+            pickupStore: {
+              store_name: order.pickup_store_name || "",
+              store_id: order.pickup_store_code || "",
+              address: order.pickup_store_address || "",
+            },
+            shippingAddress: {
+              city: order.home_city || "",
+              district: order.home_district || "",
+              address: order.home_address || "",
+            },
+            status: order.payment_status || "Pending",
+            shippingStatus: order.shipping_status || "待出貨",
+            trackingNo: order.tracking_no || "",
+            customerName: order.customer_name || "",
+            customerEmail: order.customer_email || "",
+            createdAt: order.created_at
+              ? new Date(Number(order.created_at)).toLocaleString("zh-TW")
+              : "",
+          };
+        })
+      );
+
+      formattedOrders.sort((a, b) => Number(b.id) - Number(a.id));
+
+      setOrders(formattedOrders);
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "讀取全部訂單失敗");
     }
   };
 
@@ -1643,7 +1712,7 @@ export default function JGoAppPrototype() {
                       <h3 className="text-xl font-black">訂單管理</h3>
                     </div>
                     <Button
-                      onClick={() => loadOrdersForUser(currentUser)}
+                      onClick={() => loadAllOrdersForAdmin()}
                       className="rounded-2xl bg-neutral-900 text-xs"
                     >
                       刷新訂單
