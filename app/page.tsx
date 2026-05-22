@@ -1001,23 +1001,6 @@ export default function JGoAppPrototype() {
                   <button onClick={() => setTab("shop")} className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600">看全部</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                    <label className="block col-span-2">
-                      <span className="mb-1 block text-sm font-bold">性別</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          onClick={() => setSizeAI({ ...sizeAI, gender: "male" })}
-                          className={`h-11 rounded-2xl font-black ${sizeAI.gender === "male" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
-                        >
-                          男性
-                        </button>
-                        <button
-                          onClick={() => setSizeAI({ ...sizeAI, gender: "female" })}
-                          className={`h-11 rounded-2xl font-black ${sizeAI.gender === "female" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
-                        >
-                          女性
-                        </button>
-                      </div>
-                    </label>
                   {filteredProducts
                     .slice(0, 4)
                     .map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
@@ -1239,6 +1222,23 @@ export default function JGoAppPrototype() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
+                    <label className="col-span-2 block">
+                      <span className="mb-1 block text-sm font-bold">性別</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => setSizeAI({ ...sizeAI, gender: "male" })}
+                          className={`h-11 rounded-2xl font-black ${sizeAI.gender === "male" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
+                        >
+                          男性
+                        </button>
+                        <button
+                          onClick={() => setSizeAI({ ...sizeAI, gender: "female" })}
+                          className={`h-11 rounded-2xl font-black ${sizeAI.gender === "female" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
+                        >
+                          女性
+                        </button>
+                      </div>
+                    </label>
                     <Input
                       label="身高"
                       placeholder="175"
@@ -1254,16 +1254,39 @@ export default function JGoAppPrototype() {
                   </div>
 
                   {recommendedSize && (
-                    <div className="rounded-2xl bg-neutral-900 p-4 text-white">
-                      <p className="text-xs font-bold text-neutral-300">AI 推薦尺寸</p>
-                      <div className="mt-2 flex items-center justify-between">
-                        <p className="text-3xl font-black">{recommendedSize}</p>
-                        <button
-                          onClick={() => setSelectedSize(recommendedSize)}
-                          className="rounded-2xl bg-white px-4 py-2 text-sm font-black text-neutral-900"
-                        >
-                          使用推薦尺寸
-                        </button>
+                    <div className="space-y-3 rounded-3xl bg-neutral-900 p-5 text-white">
+                      <div>
+                        <p className="text-xs font-bold tracking-widest text-neutral-400">AI FIT REPORT</p>
+                        <div className="mt-2 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-4xl font-black">{recommendedSize}</p>
+                            <p className="mt-1 text-sm text-neutral-300">
+                              {sizeAI.gender === "male" ? "男性" : "女性"}｜{sizeAI.height}cm / {sizeAI.weight}kg
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setSelectedSize(recommendedSize)}
+                            className="rounded-2xl bg-white px-4 py-2 text-sm font-black text-neutral-900"
+                          >
+                            使用此尺寸
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl bg-white/10 p-4 text-sm leading-6 text-neutral-200">
+                        <p>✔ 建議版型：正常偏寬鬆</p>
+                        <p>✔ 肩線預估：微落肩</p>
+                        <p>✔ 長度預估：正常</p>
+                        <p>✔ 想穿 Oversize：可選大一號</p>
+
+                        <div className="mt-3 border-t border-white/10 pt-3">
+                          <p className="font-bold text-white">Model 參考</p>
+                          <p className="mt-1">178cm / 65kg 著用 L size</p>
+                        </div>
+
+                        <div className="mt-3 rounded-2xl bg-white/10 px-3 py-2 text-xs text-neutral-300">
+                          目前為身高體重推估版，之後可接肩寬、胸寬、腰圍做更精準推薦。
+                        </div>
                       </div>
                     </div>
                   )}
