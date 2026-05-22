@@ -49,6 +49,7 @@ export default function JGoAppPrototype() {
   const [products, setProducts] = useState([]);
   const [lookbooks, setLookbooks] = useState([]);
   const [selectedLookbook, setSelectedLookbook] = useState(null);
+  const [lookbookGender, setLookbookGender] = useState("all");
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedColor, setSelectedColor] = useState("");
@@ -99,6 +100,7 @@ export default function JGoAppPrototype() {
     title: "",
     image: "",
     tag: "",
+    gender: "unisex",
     product_ids: "",
   });
   const [editingLookbookId, setEditingLookbookId] = useState(null);
@@ -297,6 +299,7 @@ export default function JGoAppPrototype() {
         title: lookbook.title || "J-GO Lookbook",
         image: lookbook.image,
         tag: lookbook.tag || lookbook.style_tag || "AI LOOKBOOK",
+        gender: lookbook.gender || "unisex",
         product_ids: String(lookbook.product_ids || "")
           .split(",")
           .map((id) => Number(id.trim()))
@@ -327,6 +330,7 @@ export default function JGoAppPrototype() {
           title: lookbookForm.title,
           image: lookbookForm.image,
           tag: lookbookForm.tag || "AI LOOKBOOK",
+          gender: lookbookForm.gender || "unisex",
           product_ids: lookbookForm.product_ids,
         }),
       });
@@ -336,7 +340,7 @@ export default function JGoAppPrototype() {
         throw new Error(`${editingLookbookId ? "更新" : "新增"} Lookbook 失敗：${response.status}，${text}`);
       }
 
-      setLookbookForm({ title: "", image: "", tag: "", product_ids: "" });
+      setLookbookForm({ title: "", image: "", tag: "", gender: "unisex", product_ids: "" });
       setEditingLookbookId(null);
       await loadLookbooks();
       alert(editingLookbookId ? "Lookbook 已更新" : "Lookbook 已新增");
@@ -352,13 +356,14 @@ export default function JGoAppPrototype() {
       title: lookbook.title || "",
       image: lookbook.image || "",
       tag: lookbook.tag || "",
+      gender: lookbook.gender || "unisex",
       product_ids: lookbook.raw_product_ids || lookbook.product_ids?.join(",") || "",
     });
   };
 
   const cancelEditLookbook = () => {
     setEditingLookbookId(null);
-    setLookbookForm({ title: "", image: "", tag: "", product_ids: "" });
+    setLookbookForm({ title: "", image: "", tag: "", gender: "unisex", product_ids: "" });
   };
 
   const deleteLookbook = async (lookbookId) => {
@@ -873,6 +878,23 @@ export default function JGoAppPrototype() {
                 <Button onClick={loadLookbooks} className="rounded-2xl bg-neutral-900 text-sm">刷新</Button>
               </div>
 
+              <div className="grid grid-cols-4 gap-2 rounded-2xl bg-neutral-100 p-1">
+                {[
+                  { key: "all", label: "全部" },
+                  { key: "male", label: "男性" },
+                  { key: "female", label: "女性" },
+                  { key: "unisex", label: "中性" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => setLookbookGender(item.key)}
+                    className={`rounded-xl py-2 text-xs font-black ${lookbookGender === item.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500"}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
               {lookbooks.length === 0 ? (
                 <div className="rounded-3xl bg-neutral-50 p-8 text-center">
                   <Sparkles className="mx-auto mb-3 text-neutral-400" size={36} />
@@ -881,7 +903,9 @@ export default function JGoAppPrototype() {
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {lookbooks.map((lookbook) => {
+                  {lookbooks
+                  .filter((lookbook) => lookbookGender === "all" || lookbook.gender === lookbookGender)
+                  .map((lookbook) => {
                     const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
 
                     return (
@@ -1282,6 +1306,18 @@ export default function JGoAppPrototype() {
                     value={lookbookForm.tag}
                     onChange={(value) => setLookbookForm({ ...lookbookForm, tag: value })}
                   />
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-bold">性別分流</span>
+                    <select
+                      className="h-12 w-full rounded-2xl border border-neutral-200 bg-white px-4 font-bold outline-none"
+                      value={lookbookForm.gender}
+                      onChange={(e) => setLookbookForm({ ...lookbookForm, gender: e.target.value })}
+                    >
+                      <option value="male">男性</option>
+                      <option value="female">女性</option>
+                      <option value="unisex">中性</option>
+                    </select>
+                  </label>
                   <Input
                     label="關聯商品 ID"
                     placeholder="1,2,3"
@@ -1314,7 +1350,7 @@ export default function JGoAppPrototype() {
                       <img src={lookbook.image} alt={lookbook.title} className="h-16 w-16 rounded-xl object-cover" />
                       <div className="flex-1">
                         <p className="font-bold">{lookbook.title}</p>
-                        <p className="text-xs text-neutral-500">{lookbook.tag}｜商品 {lookbook.raw_product_ids}</p>
+                        <p className="text-xs text-neutral-500">{lookbook.tag}｜{lookbook.gender === "male" ? "男性" : lookbook.gender === "female" ? "女性" : "中性"}｜商品 {lookbook.raw_product_ids}</p>
                       </div>
                       <div className="flex flex-col gap-2">
                         <button onClick={() => startEditLookbook(lookbook)} className="rounded-xl bg-neutral-900 px-3 py-2 text-xs font-black text-white">
