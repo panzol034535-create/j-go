@@ -73,6 +73,7 @@ export default function JGoAppPrototype() {
   });
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [orderFilter, setOrderFilter] = useState("all");
   const [authMode, setAuthMode] = useState("login");
   const [currentUser, setCurrentUser] = useState(null);
   const [authForm, setAuthForm] = useState({ name: "", email: "", phone: "", password: "" });
@@ -1694,9 +1695,28 @@ export default function JGoAppPrototype() {
           {tab === "orders" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
               <h2 className="text-2xl font-black">我的訂單</h2>
+
+              <div className="grid grid-cols-3 gap-2 rounded-2xl bg-neutral-100 p-1">
+                {[
+                  { key: "all", label: "全部" },
+                  { key: "待出貨", label: "待出貨" },
+                  { key: "已出貨", label: "已出貨" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => setOrderFilter(item.key)}
+                    className={`rounded-xl py-2 text-sm font-black transition ${orderFilter === item.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500"}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
               {orders.length === 0 ? (
                 <EmptyState title="目前沒有訂單" text="完成結帳後，訂單會出現在這裡。" action={() => setTab("shop")} />
-              ) : orders.map((order) => (
+              ) : orders
+                .filter((order) => orderFilter === "all" ? true : order.shippingStatus === orderFilter)
+                .map((order) => (
                 <button
                   key={order.id}
                   onClick={() => {
