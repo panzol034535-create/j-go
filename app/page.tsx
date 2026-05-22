@@ -101,6 +101,7 @@ export default function JGoAppPrototype() {
     tag: "",
     product_ids: "",
   });
+  const [editingLookbookId, setEditingLookbookId] = useState(null);
   const isAdmin = currentUser?.email === "panzol034535@gmail.com";
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
@@ -315,8 +316,12 @@ export default function JGoAppPrototype() {
     }
 
     try {
-      const response = await fetch(XANO_LOOKBOOKS_URL, {
-        method: "POST",
+      const url = editingLookbookId
+        ? `${XANO_LOOKBOOKS_URL}/${editingLookbookId}`
+        : XANO_LOOKBOOKS_URL;
+
+      const response = await fetch(url, {
+        method: editingLookbookId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: lookbookForm.title,
@@ -328,16 +333,32 @@ export default function JGoAppPrototype() {
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(`新增 Lookbook 失敗：${response.status}，${text}`);
+        throw new Error(`${editingLookbookId ? "更新" : "新增"} Lookbook 失敗：${response.status}，${text}`);
       }
 
       setLookbookForm({ title: "", image: "", tag: "", product_ids: "" });
+      setEditingLookbookId(null);
       await loadLookbooks();
-      alert("Lookbook 已新增");
+      alert(editingLookbookId ? "Lookbook 已更新" : "Lookbook 已新增");
     } catch (error) {
       console.error(error);
-      alert(error.message || "新增 Lookbook 失敗");
+      alert(error.message || `${editingLookbookId ? "更新" : "新增"} Lookbook 失敗`);
     }
+  };
+
+  const startEditLookbook = (lookbook) => {
+    setEditingLookbookId(lookbook.id);
+    setLookbookForm({
+      title: lookbook.title || "",
+      image: lookbook.image || "",
+      tag: lookbook.tag || "",
+      product_ids: lookbook.raw_product_ids || lookbook.product_ids?.join(",") || "",
+    });
+  };
+
+  const cancelEditLookbook = () => {
+    setEditingLookbookId(null);
+    setLookbookForm({ title: "", image: "", tag: "", product_ids: "" });
   };
 
   const deleteLookbook = async (lookbookId) => {
@@ -1242,7 +1263,7 @@ export default function JGoAppPrototype() {
 
               <Card className="rounded-3xl border-neutral-100 shadow-sm">
                 <CardContent className="space-y-3 p-4">
-                  <h3 className="font-black">新增 AI LOOKBOOK</h3>
+                  <h3 className="font-black">{editingLookbookId ? "編輯 AI LOOKBOOK" : "新增 AI LOOKBOOK"}</h3>
                   <Input
                     label="標題"
                     placeholder="東京日系黑白穿搭"
@@ -1267,9 +1288,16 @@ export default function JGoAppPrototype() {
                     value={lookbookForm.product_ids}
                     onChange={(value) => setLookbookForm({ ...lookbookForm, product_ids: value })}
                   />
-                  <Button onClick={createLookbook} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
-                    新增 Lookbook
-                  </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button onClick={createLookbook} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
+                      {editingLookbookId ? "更新 Lookbook" : "新增 Lookbook"}
+                    </Button>
+                    {editingLookbookId && (
+                      <Button onClick={cancelEditLookbook} className="h-12 w-full rounded-2xl bg-neutral-200 text-neutral-900 text-base">
+                        取消編輯
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 
@@ -1288,9 +1316,14 @@ export default function JGoAppPrototype() {
                         <p className="font-bold">{lookbook.title}</p>
                         <p className="text-xs text-neutral-500">{lookbook.tag}｜商品 {lookbook.raw_product_ids}</p>
                       </div>
-                      <button onClick={() => deleteLookbook(lookbook.id)} className="rounded-xl bg-red-100 px-3 py-2 text-xs font-black text-red-600">
-                        刪除
-                      </button>
+                      <div className="flex flex-col gap-2">
+                        <button onClick={() => startEditLookbook(lookbook)} className="rounded-xl bg-neutral-900 px-3 py-2 text-xs font-black text-white">
+                          編輯
+                        </button>
+                        <button onClick={() => deleteLookbook(lookbook.id)} className="rounded-xl bg-red-100 px-3 py-2 text-xs font-black text-red-600">
+                          刪除
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </CardContent>
