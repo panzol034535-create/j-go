@@ -49,7 +49,7 @@ export default function JGoAppPrototype() {
   const [products, setProducts] = useState([]);
   const [lookbooks, setLookbooks] = useState([]);
   const [selectedLookbook, setSelectedLookbook] = useState(null);
-  const [lookbookGender, setLookbookGender] = useState("all");
+  const [activeGender, setActiveGender] = useState("all");
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedColor, setSelectedColor] = useState("");
@@ -218,6 +218,7 @@ export default function JGoAppPrototype() {
             })
           : [],
         tag: product.tag || "日本選品",
+        gender: product.gender || "unisex",
       };
     });
   };
@@ -861,7 +862,14 @@ export default function JGoAppPrototype() {
                   <button onClick={() => setTab("shop")} className="text-sm text-neutral-500">看全部</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  {products.slice(0, 2).map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
+                  {products
+                    .filter((product) => {
+                      if (activeGender === "all") return true;
+                      if (activeGender === "unisex") return product.gender === "unisex";
+                      return product.gender === activeGender || product.gender === "unisex";
+                    })
+                    .slice(0, 2)
+                    .map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
                 </div>
               </section>
             </motion.div>
@@ -887,8 +895,8 @@ export default function JGoAppPrototype() {
                 ].map((item) => (
                   <button
                     key={item.key}
-                    onClick={() => setLookbookGender(item.key)}
-                    className={`rounded-xl py-2 text-xs font-black ${lookbookGender === item.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500"}`}
+                    onClick={() => setActiveGender(item.key)}
+                    className={`rounded-xl py-2 text-xs font-black ${activeGender === item.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500"}`}
                   >
                     {item.label}
                   </button>
@@ -904,7 +912,7 @@ export default function JGoAppPrototype() {
               ) : (
                 <div className="space-y-5">
                   {lookbooks
-                  .filter((lookbook) => lookbookGender === "all" || lookbook.gender === lookbookGender)
+                  .filter((lookbook) => activeGender === "all" || lookbook.gender === activeGender || (activeGender !== "all" && lookbook.gender === "unisex"))
                   .map((lookbook) => {
                     const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
 
@@ -976,7 +984,13 @@ export default function JGoAppPrototype() {
                 <span className="text-sm text-neutral-500">搜尋日系襯衫、寬褲、外套</span>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {products.map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
+                {products
+                  .filter((product) => {
+                    if (activeGender === "all") return true;
+                    if (activeGender === "unisex") return product.gender === "unisex";
+                    return product.gender === activeGender || product.gender === "unisex";
+                  })
+                  .map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
               </div>
             </motion.div>
           )}
