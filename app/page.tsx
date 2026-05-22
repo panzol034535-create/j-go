@@ -45,6 +45,7 @@ const XANO_DECREASE_STOCK_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/
 const XANO_LOOKBOOKS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
 const XANO_UPDATE_ORDER_SHIPPING_STATUS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-order-shipping-status";
 const XANO_ADMIN_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-orders";
+const XANO_ADMIN_CREATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-create-product";
 
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
@@ -109,6 +110,19 @@ export default function JGoAppPrototype() {
   });
   const [editingLookbookId, setEditingLookbookId] = useState(null);
   const [sizeAI, setSizeAI] = useState({ gender: "male", height: "", weight: "" });
+  const [productForm, setProductForm] = useState({
+    name: "",
+    brand: "",
+    price: "",
+    compare_at: "",
+    image: "",
+    images: "",
+    colors: "",
+    sizes: "",
+    variants: "",
+    gender: "unisex",
+    tag: "日本選品",
+  });
   const isAdmin = currentUser?.email === "panzol034535@gmail.com";
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
@@ -390,6 +404,60 @@ export default function JGoAppPrototype() {
     } catch (error) {
       console.error(error);
       alert(error.message || "刪除 Lookbook 失敗");
+    }
+  };
+
+  const createProduct = async () => {
+    if (!isAdmin) return;
+
+    if (!productForm.name || !productForm.brand || !productForm.price || !productForm.image || !productForm.variants) {
+      alert("請至少填寫商品名稱、品牌、價格、主圖、variants");
+      return;
+    }
+
+    try {
+      const response = await fetch(XANO_ADMIN_CREATE_PRODUCT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: productForm.name,
+          brand: productForm.brand,
+          price: Number(productForm.price),
+          compare_at: Number(productForm.compare_at || productForm.price),
+          image: productForm.image,
+          images: productForm.images || productForm.image,
+          colors: productForm.colors,
+          sizes: productForm.sizes,
+          variants: productForm.variants,
+          gender: productForm.gender,
+          tag: productForm.tag || "日本選品",
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`新增商品失敗：${response.status}，${text}`);
+      }
+
+      setProductForm({
+        name: "",
+        brand: "",
+        price: "",
+        compare_at: "",
+        image: "",
+        images: "",
+        colors: "",
+        sizes: "",
+        variants: "",
+        gender: "unisex",
+        tag: "日本選品",
+      });
+
+      await refreshProductsFromXano({ useCache: false });
+      alert("商品已新增");
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "新增商品失敗");
     }
   };
 
@@ -1803,6 +1871,41 @@ export default function JGoAppPrototype() {
                       ))
                     )}
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-neutral-100 shadow-sm">
+                <CardContent className="space-y-3 p-4">
+                  <h3 className="font-black">新增商品</h3>
+                  <Input label="商品名稱" placeholder="日系寬版襯衫" value={productForm.name} onChange={(value) => setProductForm({ ...productForm, name: value })} />
+                  <Input label="品牌" placeholder="J-GO SELECT" value={productForm.brand} onChange={(value) => setProductForm({ ...productForm, brand: value })} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input label="售價" placeholder="1680" value={productForm.price} onChange={(value) => setProductForm({ ...productForm, price: value })} />
+                    <Input label="原價" placeholder="1980" value={productForm.compare_at} onChange={(value) => setProductForm({ ...productForm, compare_at: value })} />
+                  </div>
+                  <Input label="主圖網址" placeholder="https://...jpg" value={productForm.image} onChange={(value) => setProductForm({ ...productForm, image: value })} />
+                  <Input label="輪播圖片網址" placeholder="https://a.jpg,https://b.jpg" value={productForm.images} onChange={(value) => setProductForm({ ...productForm, images: value })} />
+                  <Input label="顏色" placeholder="黑色,白色,灰色" value={productForm.colors} onChange={(value) => setProductForm({ ...productForm, colors: value })} />
+                  <Input label="尺寸" placeholder="S,M,L,XL" value={productForm.sizes} onChange={(value) => setProductForm({ ...productForm, sizes: value })} />
+                  <Input label="庫存 variants" placeholder="黑色:M:5,L:3;白色:M:2,L:1" value={productForm.variants} onChange={(value) => setProductForm({ ...productForm, variants: value })} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-bold">性別分類</span>
+                      <select
+                        className="h-12 w-full rounded-2xl border border-neutral-200 bg-white px-4 font-bold outline-none"
+                        value={productForm.gender}
+                        onChange={(e) => setProductForm({ ...productForm, gender: e.target.value })}
+                      >
+                        <option value="male">男性</option>
+                        <option value="female">女性</option>
+                        <option value="unisex">中性</option>
+                      </select>
+                    </label>
+                    <Input label="Tag" placeholder="日本選品" value={productForm.tag} onChange={(value) => setProductForm({ ...productForm, tag: value })} />
+                  </div>
+                  <Button onClick={createProduct} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
+                    新增商品
+                  </Button>
                 </CardContent>
               </Card>
 
