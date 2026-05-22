@@ -1635,6 +1635,108 @@ export default function JGoAppPrototype() {
                 </CardContent>
               </Card>
 
+              <Card className="rounded-3xl border-neutral-100 shadow-sm">
+                <CardContent className="space-y-4 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-black tracking-widest text-neutral-400">ADMIN DASHBOARD</p>
+                      <h3 className="text-xl font-black">訂單管理</h3>
+                    </div>
+                    <Button
+                      onClick={() => loadOrdersForUser(currentUser)}
+                      className="rounded-2xl bg-neutral-900 text-xs"
+                    >
+                      刷新訂單
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {orders.length === 0 ? (
+                      <div className="rounded-2xl bg-neutral-50 p-5 text-center text-sm text-neutral-500">
+                        目前沒有訂單
+                      </div>
+                    ) : (
+                      orders.map((order) => (
+                        <div
+                          key={order.id}
+                          className="rounded-3xl border border-neutral-100 bg-white p-4"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-lg font-black">#{order.id}</p>
+                              <p className="text-xs text-neutral-500">{order.createdAt}</p>
+                            </div>
+
+                            <div className="flex flex-col items-end gap-2">
+                              <span className={`rounded-full px-3 py-1 text-xs font-bold ${order.status === "Paid" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>
+                                {order.status}
+                              </span>
+
+                              <span className={`rounded-full px-3 py-1 text-xs font-bold ${order.shippingStatus === "已出貨" ? "bg-blue-100 text-blue-700" : "bg-neutral-100 text-neutral-700"}`}>
+                                {order.shippingStatus}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 rounded-2xl bg-neutral-50 p-3">
+                            <p className="mb-2 text-sm font-black">商品資訊</p>
+
+                            <div className="space-y-2">
+                              {order.items.map((item) => (
+                                <div
+                                  key={item.id || `${item.product_name}-${item.color}-${item.size}`}
+                                  className="flex items-start justify-between gap-3 text-sm"
+                                >
+                                  <div>
+                                    <p className="font-bold text-neutral-900">
+                                      {item.product_name || item.name}
+                                    </p>
+                                    <p className="text-xs text-neutral-500">
+                                      {item.color} / {item.size} × {item.qty}
+                                    </p>
+                                  </div>
+
+                                  <p className="font-black">
+                                    {formatPrice(item.subtotal || (item.unit_price || 0) * item.qty)}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-2 gap-2">
+                            <Button
+                              onClick={() => updateOrderShippingStatus(order.id, "待出貨")}
+                              className={`h-11 rounded-2xl text-sm ${order.shippingStatus === "待出貨"
+                                ? "bg-neutral-900 text-white"
+                                : "bg-neutral-100 text-neutral-900"
+                                }`}
+                            >
+                              待出貨
+                            </Button>
+
+                            <Button
+                              onClick={() => updateOrderShippingStatus(order.id, "已出貨")}
+                              className={`h-11 rounded-2xl text-sm ${order.shippingStatus === "已出貨"
+                                ? "bg-blue-600 text-white"
+                                : "bg-neutral-100 text-neutral-900"
+                                }`}
+                            >
+                              已出貨
+                            </Button>
+                          </div>
+
+                          <div className="mt-4 border-t pt-4 text-right">
+                            <p className="text-sm text-neutral-500">訂單總額</p>
+                            <p className="text-2xl font-black">{formatPrice(order.total)}</p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
               <Button
                 onClick={() => refreshProductsFromXano({ useCache: false })}
                 className="h-12 w-full rounded-2xl bg-neutral-900 text-base"
