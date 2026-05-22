@@ -94,7 +94,13 @@ export default function JGoAppPrototype() {
     address: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [paymentMessage, setPaymentMessage] = useState("");
+  
+  const [lookbookForm, setLookbookForm] = useState({
+    title: "",
+    image: "",
+    tag: "",
+    product_ids: "",
+  });
   const isAdmin = currentUser?.email === "panzol034535@gmail.com";
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
@@ -279,24 +285,56 @@ export default function JGoAppPrototype() {
 
   const loadLookbooks = async () => {
     try {
-      const response = await fetch(`${XANO_LOOKBOOKS_URL}?t=${Date.now()}`);
-      if (!response.ok) throw new Error(`讀取 Lookbook 失敗：${response.status}`);
+      const (!isAdmin) return;
+    if (!lookbookForm.title || !lookbookForm.image || !lookbookForm.product_ids) {
+      alert("請填寫 title、image、product_ids");
+      return;
+    }
 
-      const data = await response.json();
-      const list = Array.isArray(data) ? data : data?.items || [];
+    try {
+      const response = await fetch(XANO_LOOKBOOKS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: lookbookForm.title,
+          image: lookbookForm.image,
+          tag: lookbookForm.tag || "AI LOOKBOOK",
+          product_ids: lookbookForm.product_ids,
+        }),
+      });
 
-      setLookbooks(list.map((lookbook) => ({
-        id: lookbook.id,
-        title: lookbook.title || "J-GO Lookbook",
-        image: lookbook.image,
-        tag: lookbook.tag || lookbook.style_tag || "AI LOOKBOOK",
-        product_ids: String(lookbook.product_ids || "")
-          .split(",")
-          .map((id) => Number(id.trim()))
-          .filter(Boolean),
-      })));
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`新增 Lookbook 失敗：${response.status}，${text}`);
+      }
+
+      setLookbookForm({ title: "", image: "", tag: "", product_ids: "" });
+      await loadLookbooks();
+      alert("Lookbook 已新增");
     } catch (error) {
       console.error(error);
+      alert(error.message || "新增 Lookbook 失敗");
+    }
+  };
+
+  const deleteLookbook = async (lookbookId) => {
+    if (!isAdmin) return;
+    if (!confirm("確定要刪除這張 Lookbook 嗎？")) return;
+
+    try {
+      const response = await fetch(`${XANO_LOOKBOOKS_URL}/${lookbookId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`刪除 Lookbook 失敗：${response.status}，${text}`);
+      }
+
+      await loadLookbooks();
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "刪除 Lookbook 失敗");
     }
   };
 
@@ -1178,6 +1216,62 @@ export default function JGoAppPrototype() {
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
               <button onClick={() => setTab("account")} className="text-sm font-bold text-neutral-500">← 返回我的帳號</button>
               <h2 className="text-2xl font-black">商品管理</h2>
+
+              <Card className="rounded-3xl border-neutral-100 shadow-sm">
+                <CardContent className="space-y-3 p-4">
+                  <h3 className="font-black">新增 AI LOOKBOOK</h3>
+                  <Input
+                    label="標題"
+                    placeholder="東京日系黑白穿搭"
+                    value={lookbookForm.title}
+                    onChange={(value) => setLookbookForm({ ...lookbookForm, title: value })}
+                  />
+                  <Input
+                    label="圖片網址"
+                    placeholder="https://...jpg"
+                    value={lookbookForm.image}
+                    onChange={(value) => setLookbookForm({ ...lookbookForm, image: value })}
+                  />
+                  <Input
+                    label="風格標籤"
+                    placeholder="CITY BOY"
+                    value={lookbookForm.tag}
+                    onChange={(value) => setLookbookForm({ ...lookbookForm, tag: value })}
+                  />
+                  <Input
+                    label="關聯商品 ID"
+                    placeholder="1,2,3"
+                    value={lookbookForm.product_ids}
+                    onChange={(value) => setLookbookForm({ ...lookbookForm, product_ids: value })}
+                  />
+                  <Button onClick={createLookbook} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
+                    新增 Lookbook
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-neutral-100 shadow-sm">
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-black">Lookbook 管理</h3>
+                    <Button onClick={loadLookbooks} className="rounded-2xl bg-neutral-900 text-xs">刷新</Button>
+                  </div>
+                  {lookbooks.length === 0 ? (
+                    <p className="text-sm text-neutral-500">目前沒有 Lookbook</p>
+                  ) : lookbooks.map((lookbook) => (
+                    <div key={lookbook.id} className="flex items-center gap-3 rounded-2xl bg-neutral-50 p-3">
+                      <img src={lookbook.image} alt={lookbook.title} className="h-16 w-16 rounded-xl object-cover" />
+                      <div className="flex-1">
+                        <p className="font-bold">{lookbook.title}</p>
+                        <p className="text-xs text-neutral-500">{lookbook.tag}｜商品 {lookbook.raw_product_ids}</p>
+                      </div>
+                      <button onClick={() => deleteLookbook(lookbook.id)} className="rounded-xl bg-red-100 px-3 py-2 text-xs font-black text-red-600">
+                        刪除
+                      </button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
 
               <Button
                 onClick={() => refreshProductsFromXano({ useCache: false })}
