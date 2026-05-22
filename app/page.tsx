@@ -105,7 +105,7 @@ export default function JGoAppPrototype() {
     product_ids: "",
   });
   const [editingLookbookId, setEditingLookbookId] = useState(null);
-  const [sizeAI, setSizeAI] = useState({ height: "", weight: "" });
+  const [sizeAI, setSizeAI] = useState({ gender: "male", height: "", weight: "" });
   const isAdmin = currentUser?.email === "panzol034535@gmail.com";
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
@@ -478,6 +478,13 @@ export default function JGoAppPrototype() {
     const weight = Number(sizeAI.weight);
 
     if (!height || !weight) return "";
+
+    if (sizeAI.gender === "female") {
+      if (height < 158 && weight < 45) return "S";
+      if (height < 168 && weight < 58) return "M";
+      if (height < 175 && weight < 68) return "L";
+      return "XL";
+    }
 
     if (height < 165 && weight < 55) return "S";
     if (height < 175 && weight < 72) return "M";
@@ -994,6 +1001,23 @@ export default function JGoAppPrototype() {
                   <button onClick={() => setTab("shop")} className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600">看全部</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
+                    <label className="block col-span-2">
+                      <span className="mb-1 block text-sm font-bold">性別</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => setSizeAI({ ...sizeAI, gender: "male" })}
+                          className={`h-11 rounded-2xl font-black ${sizeAI.gender === "male" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
+                        >
+                          男性
+                        </button>
+                        <button
+                          onClick={() => setSizeAI({ ...sizeAI, gender: "female" })}
+                          className={`h-11 rounded-2xl font-black ${sizeAI.gender === "female" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
+                        >
+                          女性
+                        </button>
+                      </div>
+                    </label>
                   {filteredProducts
                     .slice(0, 4)
                     .map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
