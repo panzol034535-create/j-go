@@ -1143,36 +1143,32 @@ export default function JGoAppPrototype() {
               </div>
             ) : (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-              <section className="relative overflow-hidden rounded-[2rem] bg-neutral-950 px-6 py-6 text-white shadow-xl">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.14),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(120,113,108,0.28),transparent_38%)]" />
-
+              <section className="relative overflow-hidden rounded-[2.35rem] bg-neutral-950 text-white shadow-2xl">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.22),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(168,162,158,0.28),transparent_38%)]" />
                 {featuredProduct?.image && (
-                  <div className="absolute right-4 top-24 h-44 w-32 overflow-hidden rounded-[1.5rem] bg-white/10 shadow-2xl sm:h-48 sm:w-36">
-                    <img
-                      src={featuredProduct.image}
-                      alt={featuredProduct.name}
-                      className="h-full w-full object-cover opacity-75"
-                    />
-                  </div>
+                  <img
+                    src={featuredProduct.image}
+                    alt={featuredProduct.name}
+                    className="absolute right-[-28px] top-16 h-72 w-52 rotate-6 rounded-[2rem] object-cover opacity-80 shadow-2xl"
+                  />
                 )}
-
-                <div className="relative z-10">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-black tracking-[0.18em] text-neutral-200 backdrop-blur">
+                <div className="relative z-10 min-h-[430px] p-6">
+                  <div className="flex items-center justify-between">
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-black tracking-[0.2em] text-neutral-200 backdrop-blur">
                       JAPAN STYLE SELECT
                     </span>
-                    <span className="shrink-0 rounded-full bg-white px-3 py-1 text-[10px] font-black text-neutral-900">NEW DROP</span>
+                    <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black text-neutral-900">NEW DROP</span>
                   </div>
 
-                  <div className="mt-9 max-w-[245px] space-y-4">
+                  <div className="mt-12 max-w-[270px] space-y-4">
                     <p className="text-sm font-bold text-neutral-300">日系男裝 × 中性穿搭 × 整套買</p>
-                    <h2 className="text-[2.7rem] font-black leading-[0.92] tracking-tight">
+                    <h2 className="text-[3.2rem] font-black leading-[0.9] tracking-tight">
                       Find your<br />Japan fit.
                     </h2>
-                    <p className="max-w-[225px] text-sm leading-6 text-neutral-300">
-                      從 AI Lookbook 找靈感，依品牌、風格快速逛到整套穿搭。
+                    <p className="text-sm leading-6 text-neutral-300">
+                      從 AI Lookbook 找靈感，依品牌、風格、性別快速逛到整套穿搭。
                     </p>
-                    <div className="flex gap-2 pt-1">
+                    <div className="flex gap-2">
                       <Button onClick={() => setTab("lookbook")} className="h-11 rounded-2xl bg-white px-5 text-neutral-900 hover:bg-neutral-100">
                         看穿搭
                       </Button>
@@ -1182,13 +1178,13 @@ export default function JGoAppPrototype() {
                     </div>
                   </div>
 
-                  <div className="mt-8 grid grid-cols-3 gap-2 rounded-[1.4rem] bg-white/10 p-2 backdrop-blur">
+                  <div className="absolute bottom-5 left-5 right-5 grid grid-cols-3 gap-2 rounded-[1.5rem] bg-white/10 p-2 backdrop-blur">
                     {[
                       { label: "LOOKS", value: lookbooks.length },
                       { label: "ITEMS", value: products.length },
                       { label: "BRANDS", value: Math.max(0, brandOptions.length - 1) },
                     ].map((item) => (
-                      <div key={item.label} className="rounded-2xl bg-white/10 px-2 py-3 text-center">
+                      <div key={item.label} className="rounded-2xl bg-white/10 p-3 text-center">
                         <p className="text-lg font-black">{item.value}</p>
                         <p className="text-[10px] font-black tracking-widest text-neutral-300">{item.label}</p>
                       </div>
@@ -1201,7 +1197,7 @@ export default function JGoAppPrototype() {
                 <div className="mb-3 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-black tracking-widest text-neutral-400">SHOP BY BRAND</p>
-                    <h3 className="text-xl font-black">熱門品牌</h3>
+                    <h3 className="text-xl font-black">品牌分類</h3>
                   </div>
                   <button
                     onClick={() => {
@@ -1219,8 +1215,8 @@ export default function JGoAppPrototype() {
                     商品載入後，這裡會自動顯示品牌分類。
                   </div>
                 ) : (
-                  <div className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none]">
-                    {homeBrandOptions.map((brand) => {
+                  <div className="grid grid-cols-2 gap-3">
+                    {homeBrandOptions.map((brand, index) => {
                       const brandProducts = products.filter((product) => product.brand === brand);
                       const coverProduct = brandProducts[0];
 
@@ -1231,18 +1227,22 @@ export default function JGoAppPrototype() {
                             setActiveBrand(brand);
                             setTab("shop");
                           }}
-                          className="group flex min-w-[145px] items-center gap-3 rounded-[1.5rem] bg-neutral-100 p-3 text-left transition active:scale-[0.98]"
+                          className="group overflow-hidden rounded-[2rem] bg-neutral-100 text-left shadow-sm transition active:scale-[0.98]"
                         >
-                          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-white">
+                          <div className="relative h-36">
                             {coverProduct?.image ? (
                               <img src={coverProduct.image} alt={brand} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
                             ) : (
                               <div className="h-full w-full bg-neutral-200" />
                             )}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="line-clamp-1 text-sm font-black text-neutral-900">{brand}</p>
-                            <p className="mt-1 text-[11px] font-bold text-neutral-500">{brandProducts.length} items</p>
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
+                            <span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-black text-neutral-800">
+                              #{String(index + 1).padStart(2, "0")}
+                            </span>
+                            <div className="absolute bottom-3 left-3 right-3 text-white">
+                              <p className="line-clamp-1 text-lg font-black tracking-tight">{brand}</p>
+                              <p className="text-[11px] font-bold text-neutral-200">{brandProducts.length} items</p>
+                            </div>
                           </div>
                         </button>
                       );
@@ -1317,8 +1317,8 @@ export default function JGoAppPrototype() {
               <section>
                 <div className="mb-3 flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-black tracking-widest text-neutral-400">NEW ARRIVALS</p>
-                    <h3 className="text-xl font-black">新品上架</h3>
+                    <p className="text-xs font-black tracking-widest text-neutral-400">SHOP THE LOOK</p>
+                    <h3 className="text-xl font-black">本週推薦商品</h3>
                   </div>
                   <button onClick={() => setTab("shop")} className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600">看全部</button>
                 </div>
