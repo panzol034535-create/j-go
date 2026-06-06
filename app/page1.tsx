@@ -48,7 +48,6 @@ const XANO_ADMIN_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/ad
 const XANO_ADMIN_CREATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-create-product";
 const XANO_ADMIN_UPDATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-update-product";
 const XANO_ADMIN_DELETE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-delete-product";
-const XANO_RECALCULATE_PRODUCTS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-recalculate-all-products";
 
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
@@ -449,30 +448,6 @@ export default function JGoAppPrototype() {
       gender: product.gender || "unisex",
       tag: product.tag || "日本選品",
     });
-  };
-
-  const recalculateAllProducts = async () => {
-    if (!isAdmin) return;
-
-    if (!confirm("確定要依照最新匯率重新計算全部商品價格嗎？")) return;
-
-    try {
-      const response = await fetch(XANO_RECALCULATE_PRODUCTS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`重算價格失敗：${response.status}，${text}`);
-      }
-
-      await refreshProductsFromXano({ useCache: false });
-      alert("全部商品價格已重算");
-    } catch (error) {
-      console.error(error);
-      alert(error.message || "重算價格失敗");
-    }
   };
 
   const createProduct = async () => {
@@ -2002,21 +1977,12 @@ export default function JGoAppPrototype() {
                 </CardContent>
               </Card>
 
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  onClick={recalculateAllProducts}
-                  className="h-12 rounded-2xl bg-red-600 text-base text-white"
-                >
-                  重算全部價格
-                </Button>
-
-                <Button
-                  onClick={() => refreshProductsFromXano({ useCache: false })}
-                  className="h-12 rounded-2xl bg-neutral-900 text-base text-white"
-                >
-                  同步商品
-                </Button>
-              </div>
+              <Button
+                onClick={() => refreshProductsFromXano({ useCache: false })}
+                className="h-12 w-full rounded-2xl bg-neutral-900 text-base"
+              >
+                重新同步 Xano 商品
+              </Button>
 
               <div className="space-y-3">
                 {products.map((product) => (
