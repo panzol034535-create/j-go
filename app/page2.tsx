@@ -560,8 +560,6 @@ export default function JGoAppPrototype() {
   });
 
   const brandOptions = ["all", ...Array.from(new Set(products.map((product) => product.brand).filter(Boolean)))];
-  const homeBrandOptions = brandOptions.filter((brand) => brand !== "all").slice(0, 8);
-  const featuredProduct = filteredProducts[0] || products[0];
 
   const shipping = subtotal > 0 ? 60 : 0;
   const total = subtotal + shipping;
@@ -1142,47 +1140,41 @@ export default function JGoAppPrototype() {
                 商品載入中...
               </div>
             ) : (
-            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-              <section className="relative overflow-hidden rounded-[2.35rem] bg-neutral-950 text-white shadow-2xl">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.22),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(168,162,158,0.28),transparent_38%)]" />
-                {featuredProduct?.image && (
-                  <img
-                    src={featuredProduct.image}
-                    alt={featuredProduct.name}
-                    className="absolute right-[-28px] top-16 h-72 w-52 rotate-6 rounded-[2rem] object-cover opacity-80 shadow-2xl"
-                  />
-                )}
-                <div className="relative z-10 min-h-[430px] p-6">
-                  <div className="flex items-center justify-between">
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-black tracking-[0.2em] text-neutral-200 backdrop-blur">
-                      JAPAN STYLE SELECT
-                    </span>
-                    <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black text-neutral-900">NEW DROP</span>
-                  </div>
-
-                  <div className="mt-12 max-w-[270px] space-y-4">
-                    <p className="text-sm font-bold text-neutral-300">日系男裝 × 中性穿搭 × 整套買</p>
-                    <h2 className="text-[3.2rem] font-black leading-[0.9] tracking-tight">
-                      Find your<br />Japan fit.
-                    </h2>
-                    <p className="text-sm leading-6 text-neutral-300">
-                      從 AI Lookbook 找靈感，依品牌、風格、性別快速逛到整套穿搭。
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-7">
+              <section className="relative overflow-hidden rounded-[2.25rem] bg-neutral-950 text-white shadow-2xl">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_36%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.12),transparent_32%)]" />
+                <div className="grid gap-5 p-6">
+                  <div className="relative z-10 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-[11px] font-black tracking-[0.18em] text-neutral-200 backdrop-blur">
+                        J-GO AI LOOKBOOK
+                      </span>
+                      <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-neutral-900">BETA</span>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-sm font-bold text-neutral-300">日本選品 × AI 穿搭靈感</p>
+                      <h2 className="text-[2.65rem] font-black leading-[0.95] tracking-tight">
+                        一張圖，買完整套日系穿搭。
+                      </h2>
+                    </div>
+                    <p className="max-w-xs text-sm leading-6 text-neutral-300">
+                      用 AI Lookbook 找風格，點進去直接看襯衫、褲子、外套與配件。
                     </p>
                     <div className="flex gap-2">
                       <Button onClick={() => setTab("lookbook")} className="h-11 rounded-2xl bg-white px-5 text-neutral-900 hover:bg-neutral-100">
-                        看穿搭
+                        探索穿搭
                       </Button>
                       <Button onClick={() => setTab("shop")} className="h-11 rounded-2xl bg-white/10 px-5 text-white hover:bg-white/20">
-                        逛新品
+                        逛商品
                       </Button>
                     </div>
                   </div>
 
-                  <div className="absolute bottom-5 left-5 right-5 grid grid-cols-3 gap-2 rounded-[1.5rem] bg-white/10 p-2 backdrop-blur">
+                  <div className="relative z-10 grid grid-cols-3 gap-2 rounded-[1.5rem] bg-white/10 p-2 backdrop-blur">
                     {[
                       { label: "LOOKS", value: lookbooks.length },
                       { label: "ITEMS", value: products.length },
-                      { label: "BRANDS", value: Math.max(0, brandOptions.length - 1) },
+                      { label: "STYLE", value: "JP" },
                     ].map((item) => (
                       <div key={item.label} className="rounded-2xl bg-white/10 p-3 text-center">
                         <p className="text-lg font-black">{item.value}</p>
@@ -1191,64 +1183,6 @@ export default function JGoAppPrototype() {
                     ))}
                   </div>
                 </div>
-              </section>
-
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-black tracking-widest text-neutral-400">SHOP BY BRAND</p>
-                    <h3 className="text-xl font-black">品牌分類</h3>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setActiveBrand("all");
-                      setTab("shop");
-                    }}
-                    className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600"
-                  >
-                    全部品牌
-                  </button>
-                </div>
-
-                {homeBrandOptions.length === 0 ? (
-                  <div className="rounded-[2rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-500">
-                    商品載入後，這裡會自動顯示品牌分類。
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    {homeBrandOptions.map((brand, index) => {
-                      const brandProducts = products.filter((product) => product.brand === brand);
-                      const coverProduct = brandProducts[0];
-
-                      return (
-                        <button
-                          key={brand}
-                          onClick={() => {
-                            setActiveBrand(brand);
-                            setTab("shop");
-                          }}
-                          className="group overflow-hidden rounded-[2rem] bg-neutral-100 text-left shadow-sm transition active:scale-[0.98]"
-                        >
-                          <div className="relative h-36">
-                            {coverProduct?.image ? (
-                              <img src={coverProduct.image} alt={brand} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
-                            ) : (
-                              <div className="h-full w-full bg-neutral-200" />
-                            )}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
-                            <span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-black text-neutral-800">
-                              #{String(index + 1).padStart(2, "0")}
-                            </span>
-                            <div className="absolute bottom-3 left-3 right-3 text-white">
-                              <p className="line-clamp-1 text-lg font-black tracking-tight">{brand}</p>
-                              <p className="text-[11px] font-bold text-neutral-200">{brandProducts.length} items</p>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
               </section>
 
               <section>
