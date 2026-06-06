@@ -55,7 +55,6 @@ export default function JGoAppPrototype() {
   const [products, setProducts] = useState([]);
   const [lookbooks, setLookbooks] = useState([]);
   const [selectedLookbook, setSelectedLookbook] = useState(null);
-  const [outfitSelections, setOutfitSelections] = useState({});
   const [activeGender, setActiveGender] = useState("all");
   const [activeBrand, setActiveBrand] = useState("all");
   const [loadingProducts, setLoadingProducts] = useState(true);
@@ -604,107 +603,47 @@ export default function JGoAppPrototype() {
     setTab("cart");
   };
 
-  const getLookbookProducts = (lookbook) => {
-    if (!lookbook?.product_ids?.length) return [];
-    return products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
-  };
+  const getDefaultCartItemFromProduct = (product) => {
+    const firstVariant = product.variants?.[0];
+    const firstAvailableSize = firstVariant?.sizes?.find((size) => size.stock > 0) || firstVariant?.sizes?.[0];
+    const color = firstVariant?.color || product.colors?.[0] || "預設";
+    const size = firstAvailableSize?.name || product.sizes?.[0] || "F";
+    const stock = firstAvailableSize?.stock ?? 999;
 
-  const getDefaultOutfitSelection = (product) => {
-    const firstVariant = product?.variants?.find((variant) =>
-      variant.sizes?.some((size) => Number(size.stock ?? 999) > 0)
-    ) || product?.variants?.[0];
-    const firstAvailableSize = firstVariant?.sizes?.find((size) => Number(size.stock ?? 999) > 0) || firstVariant?.sizes?.[0];
+    if (!product || stock <= 0) return null;
 
     return {
-      color: firstVariant?.color || product?.colors?.[0] || "",
-      size: firstAvailableSize?.name || product?.sizes?.[0] || "",
+      key: `${product.id}-${color}-${size}`,
+      ...product,
+      color,
+      size,
+      stock,
+      qty: 1,
     };
   };
 
-  const openOutfitBuilder = (lookbook) => {
-    const relatedProducts = getLookbookProducts(lookbook);
-
-    if (relatedProducts.length === 0) {
-      alert("這套穿搭還沒有綁定商品");
-      return;
-    }
-
-    const nextSelections = {};
-    relatedProducts.forEach((product) => {
-      nextSelections[product.id] = getDefaultOutfitSelection(product);
-    });
-
-    setSelectedLookbook(lookbook);
-    setOutfitSelections(nextSelections);
-    setTab("outfit-builder");
-  };
-
-  const updateOutfitSelection = (productId, patch) => {
-    setOutfitSelections((prev) => ({
-      ...prev,
-      [productId]: {
-        ...(prev[productId] || {}),
-        ...patch,
-      },
-    }));
-  };
-
-  const getProductSizeOptionsByColor = (product, color) => {
-    const variant = product?.variants?.find((item) => item.color === color);
-    return variant?.sizes?.length
-      ? variant.sizes
-      : (product?.sizes || []).map((size) => ({ name: size, stock: 999 }));
-  };
-
-  const addOutfitSelectionsToCart = () => {
+  const addLookbookToCart = (lookbook) => {
     if (!currentUser) return requireLogin();
 
-    const relatedProducts = getLookbookProducts(selectedLookbook);
+    const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
+    const cartItems = relatedProducts
+      .map((product) => getDefaultCartItemFromProduct(product))
+      .filter(Boolean);
 
-    if (relatedProducts.length === 0) {
-      alert("這套穿搭還沒有綁定商品");
+    if (cartItems.length === 0) {
+      alert("這套穿搭目前沒有可加入購物車的商品");
       return;
-    }
-
-    const nextItems = [];
-
-    for (const product of relatedProducts) {
-      const selection = outfitSelections[product.id] || {};
-      const color = selection.color;
-      const size = selection.size;
-      const sizeOptions = getProductSizeOptionsByColor(product, color);
-      const selectedSizeOption = sizeOptions.find((item) => item.name === size);
-      const stock = Number(selectedSizeOption?.stock ?? 999);
-
-      if (!color || !size) {
-        alert(`請先選擇「${product.name}」的顏色與尺寸`);
-        return;
-      }
-
-      if (stock <= 0) {
-        alert(`「${product.name}」${color} / ${size} 目前缺貨`);
-        return;
-      }
-
-      nextItems.push({
-        key: `${product.id}-${color}-${size}`,
-        ...product,
-        color,
-        size,
-        stock,
-        qty: 1,
-      });
     }
 
     setCart((prev) => {
       let nextCart = [...prev];
 
-      nextItems.forEach((newItem) => {
+      cartItems.forEach((newItem) => {
         const exists = nextCart.find((item) => item.key === newItem.key);
         if (exists) {
           nextCart = nextCart.map((item) => (
             item.key === newItem.key
-              ? { ...item, qty: Math.min(Number(item.stock ?? 999), item.qty + 1) }
+              ? { ...item, qty: Math.min((item.stock ?? 999), item.qty + 1) }
               : item
           ));
         } else {
@@ -715,7 +654,7 @@ export default function JGoAppPrototype() {
       return nextCart;
     });
 
-    alert(`已加入 ${nextItems.length} 件穿搭商品到購物車`);
+    alert(`已加入 ${cartItems.length} 件穿搭商品到購物車`);
     setTab("cart");
   };
 
@@ -1508,7 +1447,7 @@ export default function JGoAppPrototype() {
 
                             {relatedProducts.length > 0 && (
                               <button
-                                onClick={() => openOutfitBuilder(lookbook)}
+                                onClick={() => addLookbookToCart(lookbook)}
                                 className="absolute bottom-4 right-4 rounded-full bg-neutral-900/90 px-4 py-2 text-sm font-black text-white shadow-lg backdrop-blur active:scale-[0.98]"
                               >
                                 🛍 整套買
@@ -1546,7 +1485,7 @@ export default function JGoAppPrototype() {
                                 </div>
 
                                 <Button
-                                  onClick={() => openOutfitBuilder(lookbook)}
+                                  onClick={() => addLookbookToCart(lookbook)}
                                   className="h-12 w-full rounded-2xl bg-neutral-900 text-base"
                                 >
                                   🛍 整套買・{formatPrice(outfitTotal)}
@@ -1563,85 +1502,6 @@ export default function JGoAppPrototype() {
                     })}
                 </div>
               )}
-            </motion.div>
-          )}
-
-          {tab === "outfit-builder" && selectedLookbook && (
-            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-              <button onClick={() => setTab("lookbook")} className="text-sm font-bold text-neutral-500">← 返回 LOOKBOOK</button>
-
-              <div className="overflow-hidden rounded-[2rem] bg-neutral-100">
-                <img src={selectedLookbook.image} alt={selectedLookbook.title} className="h-[420px] w-full object-cover" />
-              </div>
-
-              <div className="space-y-2">
-                <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-600">{selectedLookbook.tag}</span>
-                <h2 className="text-2xl font-black leading-tight">選擇整套尺寸</h2>
-                <p className="text-sm leading-6 text-neutral-500">每件商品都先選好顏色與尺寸，再加入整套到購物車。</p>
-              </div>
-
-              <div className="space-y-4">
-                {getLookbookProducts(selectedLookbook).map((product) => {
-                  const selection = outfitSelections[product.id] || getDefaultOutfitSelection(product);
-                  const colorOptions = product.variants?.length
-                    ? product.variants.map((variant) => variant.color).filter(Boolean)
-                    : product.colors || [];
-                  const sizeOptions = getProductSizeOptionsByColor(product, selection.color);
-                  const sizeNames = sizeOptions.map((item) => item.name);
-                  const disabledSizeNames = sizeOptions.filter((item) => Number(item.stock ?? 999) <= 0).map((item) => item.name);
-                  const stockMap = Object.fromEntries(sizeOptions.map((item) => [item.name, Number(item.stock ?? 999)]));
-
-                  return (
-                    <Card key={product.id} className="rounded-[2rem] border-neutral-100 shadow-sm">
-                      <CardContent className="space-y-4 p-4">
-                        <div className="flex gap-3">
-                          <button onClick={() => openProduct(product)} className="h-24 w-20 shrink-0 overflow-hidden rounded-2xl bg-neutral-100">
-                            <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
-                          </button>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold text-neutral-400">{product.brand}</p>
-                            <h3 className="line-clamp-2 font-black leading-tight">{product.name}</h3>
-                            <p className="mt-2 text-sm font-black">{formatPrice(product.price)}</p>
-                          </div>
-                        </div>
-
-                        <OptionGroup
-                          title="顏色"
-                          options={colorOptions}
-                          value={selection.color}
-                          setValue={(color) => {
-                            const nextSizeOptions = getProductSizeOptionsByColor(product, color);
-                            const nextSize = nextSizeOptions.find((item) => Number(item.stock ?? 999) > 0)?.name || nextSizeOptions[0]?.name || "";
-                            updateOutfitSelection(product.id, { color, size: nextSize });
-                          }}
-                        />
-
-                        <OptionGroup
-                          title="尺寸"
-                          options={sizeNames}
-                          value={selection.size}
-                          setValue={(size) => updateOutfitSelection(product.id, { size })}
-                          disabledOptions={disabledSizeNames}
-                          stockMap={stockMap}
-                        />
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-
-              <div className="sticky bottom-20 z-10 rounded-[2rem] border border-neutral-100 bg-white/95 p-4 shadow-2xl backdrop-blur">
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-black tracking-widest text-neutral-400">OUTFIT TOTAL</p>
-                    <p className="text-xl font-black">{formatPrice(getLookbookProducts(selectedLookbook).reduce((sum, product) => sum + Number(product.price || 0), 0))}</p>
-                  </div>
-                  <p className="text-sm font-bold text-neutral-500">{getLookbookProducts(selectedLookbook).length} 件商品</p>
-                </div>
-                <Button onClick={addOutfitSelectionsToCart} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
-                  🛍 加入整套購物車
-                </Button>
-              </div>
             </motion.div>
           )}
 
@@ -2573,7 +2433,7 @@ export default function JGoAppPrototype() {
 
         <nav className="sticky bottom-0 grid grid-cols-5 border-t bg-white px-2 py-2">
           <NavButton active={tab === "home"} icon={<Home size={20} />} label="首頁" onClick={() => setTab("home")} />
-          <NavButton active={tab === "lookbook" || tab === "lookbook-detail" || tab === "outfit-builder"} icon={<Sparkles size={20} />} label="穿搭" onClick={() => setTab("lookbook")} />
+          <NavButton active={tab === "lookbook" || tab === "lookbook-detail"} icon={<Sparkles size={20} />} label="穿搭" onClick={() => setTab("lookbook")} />
           <NavButton active={tab === "shop"} icon={<Search size={20} />} label="商品" onClick={() => setTab("shop")} />
           <NavButton active={tab === "cart"} icon={<ShoppingBag size={20} />} label="購物車" onClick={() => setTab("cart")} />
           <NavButton
