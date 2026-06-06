@@ -603,61 +603,6 @@ export default function JGoAppPrototype() {
     setTab("cart");
   };
 
-  const getDefaultCartItemFromProduct = (product) => {
-    const firstVariant = product.variants?.[0];
-    const firstAvailableSize = firstVariant?.sizes?.find((size) => size.stock > 0) || firstVariant?.sizes?.[0];
-    const color = firstVariant?.color || product.colors?.[0] || "預設";
-    const size = firstAvailableSize?.name || product.sizes?.[0] || "F";
-    const stock = firstAvailableSize?.stock ?? 999;
-
-    if (!product || stock <= 0) return null;
-
-    return {
-      key: `${product.id}-${color}-${size}`,
-      ...product,
-      color,
-      size,
-      stock,
-      qty: 1,
-    };
-  };
-
-  const addLookbookToCart = (lookbook) => {
-    if (!currentUser) return requireLogin();
-
-    const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
-    const cartItems = relatedProducts
-      .map((product) => getDefaultCartItemFromProduct(product))
-      .filter(Boolean);
-
-    if (cartItems.length === 0) {
-      alert("這套穿搭目前沒有可加入購物車的商品");
-      return;
-    }
-
-    setCart((prev) => {
-      let nextCart = [...prev];
-
-      cartItems.forEach((newItem) => {
-        const exists = nextCart.find((item) => item.key === newItem.key);
-        if (exists) {
-          nextCart = nextCart.map((item) => (
-            item.key === newItem.key
-              ? { ...item, qty: Math.min((item.stock ?? 999), item.qty + 1) }
-              : item
-          ));
-        } else {
-          nextCart.push(newItem);
-        }
-      });
-
-      return nextCart;
-    });
-
-    alert(`已加入 ${cartItems.length} 件穿搭商品到購物車`);
-    setTab("cart");
-  };
-
   const updateQty = (key, delta) => {
     setCart((prev) => prev
       .map((item) => {
@@ -1391,8 +1336,8 @@ export default function JGoAppPrototype() {
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-bold tracking-widest text-neutral-400">STYLE FEED</p>
-                  <h2 className="text-3xl font-black">AI 穿搭靈感</h2>
+                  <p className="text-sm font-bold text-neutral-400">AI STYLE INSPIRATION</p>
+                  <h2 className="text-2xl font-black">AI LOOKBOOK</h2>
                 </div>
                 <Button onClick={loadLookbooks} className="rounded-2xl bg-neutral-900 text-sm">刷新</Button>
               </div>
@@ -1421,85 +1366,45 @@ export default function JGoAppPrototype() {
                   <p className="mt-1 text-sm text-neutral-500">先到 Xano 新增 AI 穿搭圖片。</p>
                 </div>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   {lookbooks
-                    .filter((lookbook) => activeGender === "all" || lookbook.gender === activeGender || (activeGender !== "all" && lookbook.gender === "unisex"))
-                    .map((lookbook, index) => {
-                      const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
-                      const outfitTotal = relatedProducts.reduce((sum, product) => sum + Number(product.price || 0), 0);
+                  .filter((lookbook) => activeGender === "all" || lookbook.gender === activeGender || (activeGender !== "all" && lookbook.gender === "unisex"))
+                  .map((lookbook) => {
+                    const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
 
-                      return (
-                        <Card key={lookbook.id} className="overflow-hidden rounded-[2rem] border-neutral-100 shadow-sm">
-                          <div className="relative">
-                            <button
-                              onClick={() => {
-                                setSelectedLookbook(lookbook);
-                                setTab("lookbook-detail");
-                              }}
-                              className="block w-full text-left"
-                            >
-                              <img src={lookbook.image} alt={lookbook.title} className="h-[500px] w-full object-cover" />
-                            </button>
-
-                            <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1.5 text-sm font-black text-neutral-800 backdrop-blur">
-                              #{String(index + 1).padStart(2, "0")}
-                            </div>
-
-                            {relatedProducts.length > 0 && (
-                              <button
-                                onClick={() => addLookbookToCart(lookbook)}
-                                className="absolute bottom-4 right-4 rounded-full bg-neutral-900/90 px-4 py-2 text-sm font-black text-white shadow-lg backdrop-blur active:scale-[0.98]"
-                              >
-                                🛍 整套買
-                              </button>
-                            )}
-                          </div>
-
-                          <CardContent className="space-y-4 p-4">
+                    return (
+                      <Card key={lookbook.id} className="overflow-hidden rounded-[2rem] border-neutral-100 shadow-sm">
+                        <button
+                          onClick={() => {
+                            setSelectedLookbook(lookbook);
+                            setTab("lookbook-detail");
+                          }}
+                          className="block w-full text-left"
+                        >
+                          <img src={lookbook.image} alt={lookbook.title} className="h-[520px] w-full object-cover" />
+                          <CardContent className="space-y-3 p-4">
                             <div>
                               <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-600">{lookbook.tag}</span>
-                              <h3 className="mt-3 text-2xl font-black leading-tight">{lookbook.title}</h3>
+                              <h3 className="mt-3 text-xl font-black">{lookbook.title}</h3>
                             </div>
-
-                            {relatedProducts.length > 0 ? (
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <p className="text-sm font-black">本套商品</p>
-                                  <p className="text-sm font-bold text-neutral-500">{relatedProducts.length} 件商品</p>
-                                </div>
-
-                                <div className="grid grid-cols-4 gap-2">
-                                  {relatedProducts.slice(0, 4).map((product) => (
-                                    <button
-                                      key={product.id}
-                                      onClick={() => openProduct(product)}
-                                      className="text-left"
-                                    >
-                                      <div className="overflow-hidden rounded-2xl bg-neutral-100">
-                                        <img src={product.image} alt={product.name} className="h-20 w-full object-cover" />
-                                      </div>
-                                      <p className="mt-1 line-clamp-1 text-[11px] font-bold">{product.name}</p>
-                                      <p className="text-[11px] font-black">{formatPrice(product.price)}</p>
-                                    </button>
-                                  ))}
-                                </div>
-
-                                <Button
-                                  onClick={() => addLookbookToCart(lookbook)}
-                                  className="h-12 w-full rounded-2xl bg-neutral-900 text-base"
-                                >
-                                  🛍 整套買・{formatPrice(outfitTotal)}
-                                </Button>
-                              </div>
-                            ) : (
-                              <div className="rounded-2xl bg-neutral-50 p-4 text-sm font-bold text-neutral-500">
-                                這套穿搭還沒有綁定商品。
+                            {relatedProducts.length > 0 && (
+                              <div className="flex gap-2 overflow-x-auto pb-1">
+                                {relatedProducts.map((product) => (
+                                  <div key={product.id} className="flex min-w-[150px] items-center gap-2 rounded-2xl bg-neutral-50 p-2">
+                                    <img src={product.image} alt={product.name} className="h-12 w-12 rounded-xl object-cover" />
+                                    <div>
+                                      <p className="line-clamp-1 text-xs font-bold">{product.name}</p>
+                                      <p className="text-xs font-black">{formatPrice(product.price)}</p>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             )}
                           </CardContent>
-                        </Card>
-                      );
-                    })}
+                        </button>
+                      </Card>
+                    );
+                  })}
                 </div>
               )}
             </motion.div>
