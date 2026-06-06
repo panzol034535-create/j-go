@@ -1441,26 +1441,6 @@ export default function JGoAppPrototype() {
               </div>
 
               <div className="space-y-2">
-                <p className="text-sm font-black">性別分類</p>
-                <div className="grid grid-cols-4 gap-2 rounded-2xl bg-neutral-100 p-1">
-                  {[
-                    { key: "all", label: "全部" },
-                    { key: "male", label: "男裝" },
-                    { key: "female", label: "女裝" },
-                    { key: "unisex", label: "中性" },
-                  ].map((item) => (
-                    <button
-                      key={item.key}
-                      onClick={() => setActiveGender(item.key)}
-                      className={`rounded-xl py-2 text-xs font-black transition ${activeGender === item.key ? "bg-neutral-900 text-white shadow-sm" : "text-neutral-500"}`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
                 <p className="text-sm font-black">品牌分類</p>
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {brandOptions.map((brand) => (
@@ -1475,33 +1455,9 @@ export default function JGoAppPrototype() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-neutral-500">
-                  共 {filteredProducts.length} 件商品
-                </p>
-                {(activeGender !== "all" || activeBrand !== "all") && (
-                  <button
-                    onClick={() => {
-                      setActiveGender("all");
-                      setActiveBrand("all");
-                    }}
-                    className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600"
-                  >
-                    清除篩選
-                  </button>
-                )}
+              <div className="grid grid-cols-2 gap-3">
+                {filteredProducts.map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
               </div>
-
-              {filteredProducts.length === 0 ? (
-                <div className="rounded-[2rem] bg-neutral-50 p-8 text-center">
-                  <h3 className="font-black">目前沒有符合的商品</h3>
-                  <p className="mt-1 text-sm text-neutral-500">可以切換性別或品牌分類看看。</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  {filteredProducts.map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
-                </div>
-              )}
             </motion.div>
           )}
 
