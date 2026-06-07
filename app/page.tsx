@@ -34,6 +34,25 @@ function formatPrice(n) {
   return `NT$ ${value.toLocaleString("zh-TW")}`;
 }
 
+function formatModelInfo(product) {
+  if (!product) return "";
+
+  const height = product.modelHeight;
+  const weight = product.modelWeight;
+  const size = product.modelSize;
+
+  if (!height && !weight && !size) return "";
+
+  const body = [
+    height ? `${height}cm` : "",
+    weight ? `${weight}kg` : "",
+  ].filter(Boolean).join(" / ");
+
+  if (body && size) return `${body} 著用 ${size} size`;
+  if (body) return body;
+  return `著用 ${size} size`;
+}
+
 const XANO_CHECKOUT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/checkout";
 const XANO_ADD_ORDER_ITEM_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/add-order-item";
 const XANO_GET_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/Get_Orders";
@@ -128,7 +147,9 @@ export default function JGoAppPrototype() {
     description: "",
     material: "",
     fit: "",
-    model_info: "",
+    model_height: "",
+    model_weight: "",
+    model_size: "",
     size_chart: "",
   });
   const [editingProductId, setEditingProductId] = useState(null);
@@ -251,7 +272,9 @@ export default function JGoAppPrototype() {
         description: product.description || "",
         material: product.material || "",
         fit: product.fit || "",
-        modelInfo: product.model_info || "",
+        modelHeight: product.model_height || "",
+        modelWeight: product.model_weight || "",
+        modelSize: product.model_size || "",
         sizeChart: product.size_chart || "",
       };
     });
@@ -437,9 +460,11 @@ export default function JGoAppPrototype() {
       description: "",
       material: "",
       fit: "",
-      model_info: "",
+      model_height: "",
+      model_weight: "",
+      model_size: "",
       size_chart: "",
-      });
+    });
     setEditingProductId(null);
   };
 
@@ -465,7 +490,9 @@ export default function JGoAppPrototype() {
       description: product.description || "",
       material: product.material || "",
       fit: product.fit || "",
-      model_info: product.modelInfo || "",
+      model_height: String(product.modelHeight || ""),
+      model_weight: String(product.modelWeight || ""),
+      model_size: product.modelSize || "",
       size_chart: product.sizeChart || "",
     });
   };
@@ -518,7 +545,9 @@ export default function JGoAppPrototype() {
         description: productForm.description,
         material: productForm.material,
         fit: productForm.fit,
-        model_info: productForm.model_info,
+        model_height: Number(productForm.model_height || 0),
+        model_weight: Number(productForm.model_weight || 0),
+        model_size: productForm.model_size,
         size_chart: productForm.size_chart,
       };
 
@@ -1846,7 +1875,7 @@ export default function JGoAppPrototype() {
               {selectedSize && selectedSizeStock <= 0 && (
                 <p className="text-sm font-bold text-red-500">此尺寸目前缺貨</p>
               )}
-              {(selectedProduct.description || selectedProduct.material || selectedProduct.fit || selectedProduct.modelInfo || selectedProduct.sizeChart) && (
+              {(selectedProduct.description || selectedProduct.material || selectedProduct.fit || formatModelInfo(selectedProduct) || selectedProduct.sizeChart) && (
                 <Card className="rounded-3xl border-neutral-100 bg-neutral-50 shadow-sm">
                   <CardContent className="space-y-5 p-5">
                     <div>
@@ -1863,8 +1892,8 @@ export default function JGoAppPrototype() {
                       {selectedProduct.fit && <DetailBlock title="版型" text={selectedProduct.fit} />}
                     </div>
 
-                    {selectedProduct.modelInfo && (
-                      <DetailBlock title="Model 參考" text={selectedProduct.modelInfo} />
+                    {formatModelInfo(selectedProduct) && (
+                      <DetailBlock title="Model 參考" text={formatModelInfo(selectedProduct)} />
                     )}
 
                     {selectedProduct.sizeChart && (
@@ -2403,7 +2432,11 @@ export default function JGoAppPrototype() {
                       <Input label="材質" placeholder="棉 / 聚酯纖維" value={productForm.material} onChange={(value) => setProductForm({ ...productForm, material: value })} />
                       <Input label="版型" placeholder="寬鬆 / 落肩" value={productForm.fit} onChange={(value) => setProductForm({ ...productForm, fit: value })} />
                     </div>
-                    <Input label="Model 資訊" placeholder="178cm / 65kg 著用 L size" value={productForm.model_info} onChange={(value) => setProductForm({ ...productForm, model_info: value })} />
+                    <div className="grid grid-cols-3 gap-2">
+                      <Input label="Model身高" placeholder="178" value={productForm.model_height} onChange={(value) => setProductForm({ ...productForm, model_height: value })} />
+                      <Input label="Model體重" placeholder="65" value={productForm.model_weight} onChange={(value) => setProductForm({ ...productForm, model_weight: value })} />
+                      <Input label="著用尺寸" placeholder="L" value={productForm.model_size} onChange={(value) => setProductForm({ ...productForm, model_size: value })} />
+                    </div>
                     <TextArea label="尺寸表" placeholder={"尺寸,長度,肩寬,胸圍,袖長\nS,74,53.5,124,29\nM,76,55,128,30\nL,78,56.5,132,31"} value={productForm.size_chart} onChange={(value) => setProductForm({ ...productForm, size_chart: value })} />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
