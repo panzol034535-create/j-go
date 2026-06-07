@@ -117,7 +117,8 @@ export default function JGoAppPrototype() {
   const [productForm, setProductForm] = useState({
     name: "",
     brand: "",
-    jpy_price: "",
+    price: "",
+    compare_at: "",
     image: "",
     images: "",
     colors: "",
@@ -130,6 +131,7 @@ export default function JGoAppPrototype() {
     fit: "",
     model_info: "",
     size_chart: "",
+    care: "",
   });
   const [editingProductId, setEditingProductId] = useState(null);
   const isAdmin = currentUser?.email === "panzol034535@gmail.com";
@@ -222,7 +224,6 @@ export default function JGoAppPrototype() {
         name: product.name,
         brand: product.brand,
         price: product.price,
-        jpyPrice: product.jpy_price,
         compareAt: product.compare_at,
         image: images[0] || product.image,
         images,
@@ -253,6 +254,7 @@ export default function JGoAppPrototype() {
         fit: product.fit || "",
         modelInfo: product.model_info || "",
         sizeChart: product.size_chart || "",
+        care: product.care || "",
       };
     });
   };
@@ -426,7 +428,8 @@ export default function JGoAppPrototype() {
     setProductForm({
       name: "",
       brand: "",
-      jpy_price: "",
+      price: "",
+      compare_at: "",
       image: "",
       images: "",
       colors: "",
@@ -439,7 +442,8 @@ export default function JGoAppPrototype() {
       fit: "",
       model_info: "",
       size_chart: "",
-      });
+      care: "",
+    });
     setEditingProductId(null);
   };
 
@@ -454,7 +458,8 @@ export default function JGoAppPrototype() {
     setProductForm({
       name: product.name || "",
       brand: product.brand || "",
-      jpy_price: String(product.jpyPrice || ""),
+      price: String(product.price || ""),
+      compare_at: String(product.compareAt || product.price || ""),
       image: product.image || "",
       images: (product.images || []).join(","),
       colors: (product.colors || []).join(","),
@@ -467,6 +472,7 @@ export default function JGoAppPrototype() {
       fit: product.fit || "",
       model_info: product.modelInfo || "",
       size_chart: product.sizeChart || "",
+      care: product.care || "",
     });
   };
 
@@ -497,8 +503,8 @@ export default function JGoAppPrototype() {
   const createProduct = async () => {
     if (!isAdmin) return;
 
-    if (!productForm.name || !productForm.brand || !productForm.jpy_price || !productForm.image || !productForm.variants) {
-      alert("請至少填寫商品名稱、品牌、日幣價格、主圖、variants");
+    if (!productForm.name || !productForm.brand || !productForm.price || !productForm.image || !productForm.variants) {
+      alert("請至少填寫商品名稱、品牌、價格、主圖、variants");
       return;
     }
 
@@ -507,7 +513,8 @@ export default function JGoAppPrototype() {
         product_id: editingProductId,
         name: productForm.name,
         brand: productForm.brand,
-        jpy_price: Number(productForm.jpy_price),
+        price: Number(productForm.price),
+        compare_at: Number(productForm.compare_at || productForm.price),
         image: productForm.image,
         images: productForm.images || productForm.image,
         colors: productForm.colors,
@@ -520,6 +527,7 @@ export default function JGoAppPrototype() {
         fit: productForm.fit,
         model_info: productForm.model_info,
         size_chart: productForm.size_chart,
+        care: productForm.care,
       };
 
       const response = await fetch(editingProductId ? XANO_ADMIN_UPDATE_PRODUCT_URL : XANO_ADMIN_CREATE_PRODUCT_URL, {
@@ -531,15 +539,6 @@ export default function JGoAppPrototype() {
       if (!response.ok) {
         const text = await response.text();
         throw new Error(`${editingProductId ? "更新" : "新增"}商品失敗：${response.status}，${text}`);
-      }
-
-      try {
-        await fetch(XANO_RECALCULATE_PRODUCTS_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
-      } catch (recalculateError) {
-        console.error("重算商品價格失敗", recalculateError);
       }
 
       resetProductForm();
@@ -1846,7 +1845,7 @@ export default function JGoAppPrototype() {
               {selectedSize && selectedSizeStock <= 0 && (
                 <p className="text-sm font-bold text-red-500">此尺寸目前缺貨</p>
               )}
-              {(selectedProduct.description || selectedProduct.material || selectedProduct.fit || selectedProduct.modelInfo || selectedProduct.sizeChart) && (
+              {(selectedProduct.description || selectedProduct.material || selectedProduct.fit || selectedProduct.modelInfo || selectedProduct.sizeChart || selectedProduct.care) && (
                 <Card className="rounded-3xl border-neutral-100 bg-neutral-50 shadow-sm">
                   <CardContent className="space-y-5 p-5">
                     <div>
@@ -1868,7 +1867,14 @@ export default function JGoAppPrototype() {
                     )}
 
                     {selectedProduct.sizeChart && (
-                      <SizeChartTable sizeChart={selectedProduct.sizeChart} />
+                      <div>
+                        <p className="mb-2 text-sm font-black">尺寸表</p>
+                        <pre className="whitespace-pre-wrap rounded-2xl bg-white p-4 text-sm leading-6 text-neutral-700">{selectedProduct.sizeChart}</pre>
+                      </div>
+                    )}
+
+                    {selectedProduct.care && (
+                      <DetailBlock title="洗滌方式" text={selectedProduct.care} />
                     )}
                   </CardContent>
                 </Card>
@@ -2368,10 +2374,10 @@ export default function JGoAppPrototype() {
                   <h3 className="font-black">{editingProductId ? "編輯商品" : "新增商品"}</h3>
                   <Input label="商品名稱" placeholder="日系寬版襯衫" value={productForm.name} onChange={(value) => setProductForm({ ...productForm, name: value })} />
                   <Input label="品牌" placeholder="J-GO SELECT" value={productForm.brand} onChange={(value) => setProductForm({ ...productForm, brand: value })} />
-                  <Input label="日幣價格（¥）" placeholder="8900" value={productForm.jpy_price} onChange={(value) => setProductForm({ ...productForm, jpy_price: value })} />
-                  <p className="rounded-2xl bg-neutral-50 px-4 py-3 text-xs font-bold leading-5 text-neutral-500">
-                    台幣售價會由 Xano 的 jpy_rate × profit_rate 自動重算，前端後台不用手動輸入台幣價格。
-                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input label="售價" placeholder="1680" value={productForm.price} onChange={(value) => setProductForm({ ...productForm, price: value })} />
+                    <Input label="原價" placeholder="1980" value={productForm.compare_at} onChange={(value) => setProductForm({ ...productForm, compare_at: value })} />
+                  </div>
                   <Input label="主圖網址" placeholder="https://...jpg" value={productForm.image} onChange={(value) => setProductForm({ ...productForm, image: value })} />
                   <Input label="輪播圖片網址" placeholder="https://a.jpg,https://b.jpg" value={productForm.images} onChange={(value) => setProductForm({ ...productForm, images: value })} />
                   <Input label="顏色" placeholder="黑色,白色,灰色" value={productForm.colors} onChange={(value) => setProductForm({ ...productForm, colors: value })} />
@@ -2404,7 +2410,8 @@ export default function JGoAppPrototype() {
                       <Input label="版型" placeholder="寬鬆 / 落肩" value={productForm.fit} onChange={(value) => setProductForm({ ...productForm, fit: value })} />
                     </div>
                     <Input label="Model 資訊" placeholder="178cm / 65kg 著用 L size" value={productForm.model_info} onChange={(value) => setProductForm({ ...productForm, model_info: value })} />
-                    <TextArea label="尺寸表" placeholder={"尺寸,長度,肩寬,胸圍,袖長\nS,74,53.5,124,29\nM,76,55,128,30\nL,78,56.5,132,31"} value={productForm.size_chart} onChange={(value) => setProductForm({ ...productForm, size_chart: value })} />
+                    <TextArea label="尺寸表" placeholder={"M：肩寬 54 / 胸寬 62 / 衣長 72\nL：肩寬 56 / 胸寬 64 / 衣長 74"} value={productForm.size_chart} onChange={(value) => setProductForm({ ...productForm, size_chart: value })} />
+                    <TextArea label="洗滌方式" placeholder="建議反面洗滌，低溫水洗，避免烘乾。" value={productForm.care} onChange={(value) => setProductForm({ ...productForm, care: value })} />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <Button onClick={createProduct} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
@@ -2706,66 +2713,6 @@ function OptionGroup({ title, options, value, setValue, disabledOptions = [], st
         })}
       </div>
     </section>
-  );
-}
-
-function parseSizeChart(sizeChart) {
-  if (!sizeChart) return [];
-
-  return String(sizeChart)
-    .trim()
-    .split(/\r?\n/)
-    .map((row) => row.trim())
-    .filter(Boolean)
-    .map((row) => row.split(/[,，\t]/).map((cell) => cell.trim()).filter(Boolean));
-}
-
-function SizeChartTable({ sizeChart }) {
-  const rows = parseSizeChart(sizeChart);
-
-  if (rows.length < 2 || rows[0].length < 2) {
-    return (
-      <div>
-        <p className="mb-2 text-sm font-black">尺寸表</p>
-        <pre className="whitespace-pre-wrap rounded-2xl bg-white p-4 text-sm leading-6 text-neutral-700">{sizeChart}</pre>
-      </div>
-    );
-  }
-
-  const headers = rows[0];
-  const bodyRows = rows.slice(1);
-
-  return (
-    <div>
-      <p className="mb-2 text-sm font-black">尺寸表</p>
-      <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[420px] border-collapse text-center text-sm">
-            <thead className="bg-neutral-100 text-neutral-700">
-              <tr>
-                {headers.map((header) => (
-                  <th key={header} className="border-b border-neutral-200 px-3 py-3 font-black">
-                    {header}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {bodyRows.map((row, rowIndex) => (
-                <tr key={`${row.join("-")}-${rowIndex}`} className="odd:bg-white even:bg-neutral-50">
-                  {headers.map((header, cellIndex) => (
-                    <td key={`${header}-${cellIndex}`} className={`border-b border-neutral-100 px-3 py-3 ${cellIndex === 0 ? "font-black text-neutral-900" : "text-neutral-600"}`}>
-                      {row[cellIndex] || "-"}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <p className="mt-2 text-xs leading-5 text-neutral-400">尺寸單位：cm。人工測量可能有 1–3cm 誤差。</p>
-    </div>
   );
 }
 
