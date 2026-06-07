@@ -53,88 +53,6 @@ function formatModelInfo(product) {
   return `著用 ${size} size`;
 }
 
-
-const SIZE_ORDER = ["XS", "S", "M", "L", "XL", "XXL", "FREE"];
-
-function normalizeSizeName(size) {
-  return String(size || "").trim().toUpperCase();
-}
-
-function getAvailableSizeNames(product) {
-  const fromVariants = (product?.variants || [])
-    .flatMap((variant) => variant.sizes || [])
-    .filter((size) => Number(size.stock ?? 999) > 0)
-    .map((size) => normalizeSizeName(size.name))
-    .filter(Boolean);
-
-  const fromSizes = (product?.sizes || []).map(normalizeSizeName).filter(Boolean);
-  const unique = Array.from(new Set([...fromVariants, ...fromSizes]));
-
-  return unique.sort((a, b) => {
-    const ai = SIZE_ORDER.indexOf(a);
-    const bi = SIZE_ORDER.indexOf(b);
-    if (ai === -1 && bi === -1) return a.localeCompare(b);
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
-}
-
-function moveSize(size, diff, availableSizes = []) {
-  const normalized = normalizeSizeName(size);
-  const candidates = availableSizes.length ? availableSizes : SIZE_ORDER;
-  const index = candidates.indexOf(normalized);
-
-  if (index === -1) return normalized || candidates[0] || "";
-  return candidates[Math.max(0, Math.min(candidates.length - 1, index + diff))];
-}
-
-function buildFitRecommendation(product, sizeAI) {
-  const userHeight = Number(sizeAI.height);
-  const userWeight = Number(sizeAI.weight);
-  const modelHeight = Number(product?.modelHeight);
-  const modelWeight = Number(product?.modelWeight);
-  const modelSize = normalizeSizeName(product?.modelSize);
-  const availableSizes = getAvailableSizeNames(product).filter((size) => size !== "FREE");
-
-  if (!userHeight || !userWeight) {
-    return { size: "", reason: "請輸入身高與體重，系統會依 Model 參考推薦尺寸。", details: [] };
-  }
-
-  if (!modelSize || !modelHeight || !modelWeight) {
-    return { size: "", reason: "此商品尚未設定 Model 身高、體重或著用尺寸。", details: [] };
-  }
-
-  if (modelSize === "FREE") {
-    return {
-      size: "FREE",
-      reason: "此商品為 FREE SIZE，建議參考商品尺寸表與版型。",
-      details: [`Model ${modelHeight}cm / ${modelWeight}kg 著用 FREE size`],
-    };
-  }
-
-  const heightDiff = userHeight - modelHeight;
-  const weightDiff = userWeight - modelWeight;
-  let step = 0;
-
-  if (weightDiff >= 10 || heightDiff >= 8) step = 1;
-  else if (weightDiff <= -10 && heightDiff <= -5) step = -1;
-  else if (weightDiff >= 6 && heightDiff >= 4) step = 1;
-  else if (weightDiff <= -8) step = -1;
-
-  const size = moveSize(modelSize, step, availableSizes);
-  const direction = step > 0 ? "大一號" : step < 0 ? "小一號" : "同尺寸";
-
-  return {
-    size,
-    reason: `你比 Model ${heightDiff >= 0 ? "高" : "矮"}${Math.abs(heightDiff)}cm、${weightDiff >= 0 ? "重" : "輕"}${Math.abs(weightDiff)}kg，建議先選 ${direction}。`,
-    details: [
-      `Model ${modelHeight}cm / ${modelWeight}kg 著用 ${modelSize} size`,
-      step === 0 ? "身形差距不大，建議選 Model 著用尺寸。" : "若想穿更寬鬆，可再往上選一碼。",
-    ],
-  };
-}
-
 const XANO_CHECKOUT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/checkout";
 const XANO_ADD_ORDER_ITEM_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/add-order-item";
 const XANO_GET_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/Get_Orders";
@@ -232,8 +150,6 @@ export default function JGoAppPrototype() {
     model_height: "",
     model_weight: "",
     model_size: "",
-    recommended_height: "",
-    recommended_weight: "",
     size_chart: "",
   });
   const [editingProductId, setEditingProductId] = useState(null);
@@ -359,8 +275,6 @@ export default function JGoAppPrototype() {
         modelHeight: product.model_height || "",
         modelWeight: product.model_weight || "",
         modelSize: product.model_size || "",
-        recommendedHeight: product.recommended_height || "",
-        recommendedWeight: product.recommended_weight || "",
         sizeChart: product.size_chart || "",
       };
     });
@@ -579,8 +493,6 @@ export default function JGoAppPrototype() {
       model_height: String(product.modelHeight || ""),
       model_weight: String(product.modelWeight || ""),
       model_size: product.modelSize || "",
-      recommended_height: product.recommendedHeight || "",
-      recommended_weight: product.recommendedWeight || "",
       size_chart: product.sizeChart || "",
     });
   };
@@ -636,8 +548,6 @@ export default function JGoAppPrototype() {
         model_height: Number(productForm.model_height || 0),
         model_weight: Number(productForm.model_weight || 0),
         model_size: productForm.model_size,
-        recommended_height: productForm.recommended_height,
-        recommended_weight: productForm.recommended_weight,
         size_chart: productForm.size_chart,
       };
 
@@ -898,8 +808,24 @@ export default function JGoAppPrototype() {
   const availableSizes = availableSizeOptions.map((size) => size.name);
   const selectedSizeStock = availableSizeOptions.find((size) => size.name === selectedSize)?.stock ?? 999;
 
-  const fitRecommendation = useMemo(() => buildFitRecommendation(selectedProduct, sizeAI), [selectedProduct, sizeAI]);
-  const recommendedSize = fitRecommendation.size;
+  const recommendedSize = useMemo(() => {
+    const height = Number(sizeAI.height);
+    const weight = Number(sizeAI.weight);
+
+    if (!height || !weight) return "";
+
+    if (sizeAI.gender === "female") {
+      if (height < 158 && weight < 45) return "S";
+      if (height < 168 && weight < 58) return "M";
+      if (height < 175 && weight < 68) return "L";
+      return "XL";
+    }
+
+    if (height < 165 && weight < 55) return "S";
+    if (height < 175 && weight < 72) return "M";
+    if (height < 183 && weight < 85) return "L";
+    return "XL";
+  }, [sizeAI]);
 
   const goToPrevImage = () => {
     if (productImages.length <= 1) return;
@@ -2036,26 +1962,18 @@ export default function JGoAppPrototype() {
                       </div>
 
                       <div className="rounded-2xl bg-white/10 p-4 text-sm leading-6 text-neutral-200">
-                        <p>✔ {fitRecommendation.reason}</p>
-                        <p>✔ 建議版型：{selectedProduct.fit || "正常偏寬鬆"}</p>
+                        <p>✔ 建議版型：正常偏寬鬆</p>
+                        <p>✔ 肩線預估：微落肩</p>
+                        <p>✔ 長度預估：正常</p>
                         <p>✔ 想穿 Oversize：可選大一號</p>
 
                         <div className="mt-3 border-t border-white/10 pt-3">
                           <p className="font-bold text-white">Model 參考</p>
-                          <p className="mt-1">{formatModelInfo(selectedProduct) || "尚未設定 Model 資訊"}</p>
-                          {fitRecommendation.details?.map((detail) => (
-                            <p key={detail} className="mt-1 text-xs text-neutral-300">{detail}</p>
-                          ))}
+                          <p className="mt-1">178cm / 65kg 著用 L size</p>
                         </div>
 
-                        {(selectedProduct.recommendedHeight || selectedProduct.recommendedWeight) && (
-                          <div className="mt-3 rounded-2xl bg-white/10 px-3 py-2 text-xs text-neutral-300">
-                            商品建議範圍：{selectedProduct.recommendedHeight || "-"}cm / {selectedProduct.recommendedWeight || "-"}kg
-                          </div>
-                        )}
-
                         <div className="mt-3 rounded-2xl bg-white/10 px-3 py-2 text-xs text-neutral-300">
-                          目前為 Model 參考推估版，之後可接肩寬、胸寬、腰圍做更精準推薦。
+                          目前為身高體重推估版，之後可接肩寬、胸寬、腰圍做更精準推薦。
                         </div>
                       </div>
                     </div>
@@ -2518,10 +2436,6 @@ export default function JGoAppPrototype() {
                       <Input label="Model身高" placeholder="178" value={productForm.model_height} onChange={(value) => setProductForm({ ...productForm, model_height: value })} />
                       <Input label="Model體重" placeholder="65" value={productForm.model_weight} onChange={(value) => setProductForm({ ...productForm, model_weight: value })} />
                       <Input label="著用尺寸" placeholder="L" value={productForm.model_size} onChange={(value) => setProductForm({ ...productForm, model_size: value })} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input label="推薦身高範圍" placeholder="170-180" value={productForm.recommended_height} onChange={(value) => setProductForm({ ...productForm, recommended_height: value })} />
-                      <Input label="推薦體重範圍" placeholder="60-75" value={productForm.recommended_weight} onChange={(value) => setProductForm({ ...productForm, recommended_weight: value })} />
                     </div>
                     <TextArea label="尺寸表" placeholder={"尺寸,長度,肩寬,胸圍,袖長\nS,74,53.5,124,29\nM,76,55,128,30\nL,78,56.5,132,31"} value={productForm.size_chart} onChange={(value) => setProductForm({ ...productForm, size_chart: value })} />
                   </div>
