@@ -48,12 +48,14 @@ const XANO_ADMIN_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/ad
 const XANO_ADMIN_CREATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-create-product";
 const XANO_ADMIN_UPDATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-update-product";
 const XANO_ADMIN_DELETE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-delete-product";
+const XANO_RECALCULATE_PRODUCTS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-recalculate-all-products";
 
 export default function JGoAppPrototype() {
   const [tab, setTab] = useState("home");
   const [products, setProducts] = useState([]);
   const [lookbooks, setLookbooks] = useState([]);
   const [selectedLookbook, setSelectedLookbook] = useState(null);
+  const [outfitSelections, setOutfitSelections] = useState({});
   const [activeGender, setActiveGender] = useState("all");
   const [activeBrand, setActiveBrand] = useState("all");
   const [loadingProducts, setLoadingProducts] = useState(true);
@@ -450,6 +452,30 @@ export default function JGoAppPrototype() {
     });
   };
 
+  const recalculateAllProducts = async () => {
+    if (!isAdmin) return;
+
+    if (!confirm("確定要依照最新匯率重新計算全部商品價格嗎？")) return;
+
+    try {
+      const response = await fetch(XANO_RECALCULATE_PRODUCTS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`重算價格失敗：${response.status}，${text}`);
+      }
+
+      await refreshProductsFromXano({ useCache: false });
+      alert("全部商品價格已重算");
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "重算價格失敗");
+    }
+  };
+
   const createProduct = async () => {
     if (!isAdmin) return;
 
@@ -535,6 +561,8 @@ export default function JGoAppPrototype() {
   });
 
   const brandOptions = ["all", ...Array.from(new Set(products.map((product) => product.brand).filter(Boolean)))];
+  const homeBrandOptions = brandOptions.filter((brand) => brand !== "all").slice(0, 8);
+  const featuredProduct = filteredProducts[0] || products[0];
 
   const shipping = subtotal > 0 ? 60 : 0;
   const total = subtotal + shipping;
@@ -573,6 +601,121 @@ export default function JGoAppPrototype() {
       }
       return [...prev, { key, ...selectedProduct, color: selectedColor, size: selectedSize, stock: selectedSizeStock, qty: 1 }];
     });
+    setTab("cart");
+  };
+
+  const getLookbookProducts = (lookbook) => {
+    if (!lookbook?.product_ids?.length) return [];
+    return products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
+  };
+
+  const getDefaultOutfitSelection = (product) => {
+    const firstVariant = product?.variants?.find((variant) =>
+      variant.sizes?.some((size) => Number(size.stock ?? 999) > 0)
+    ) || product?.variants?.[0];
+    const firstAvailableSize = firstVariant?.sizes?.find((size) => Number(size.stock ?? 999) > 0) || firstVariant?.sizes?.[0];
+
+    return {
+      color: firstVariant?.color || product?.colors?.[0] || "",
+      size: firstAvailableSize?.name || product?.sizes?.[0] || "",
+    };
+  };
+
+  const openOutfitBuilder = (lookbook) => {
+    const relatedProducts = getLookbookProducts(lookbook);
+
+    if (relatedProducts.length === 0) {
+      alert("這套穿搭還沒有綁定商品");
+      return;
+    }
+
+    const nextSelections = {};
+    relatedProducts.forEach((product) => {
+      nextSelections[product.id] = getDefaultOutfitSelection(product);
+    });
+
+    setSelectedLookbook(lookbook);
+    setOutfitSelections(nextSelections);
+    setTab("outfit-builder");
+  };
+
+  const updateOutfitSelection = (productId, patch) => {
+    setOutfitSelections((prev) => ({
+      ...prev,
+      [productId]: {
+        ...(prev[productId] || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const getProductSizeOptionsByColor = (product, color) => {
+    const variant = product?.variants?.find((item) => item.color === color);
+    return variant?.sizes?.length
+      ? variant.sizes
+      : (product?.sizes || []).map((size) => ({ name: size, stock: 999 }));
+  };
+
+  const addOutfitSelectionsToCart = () => {
+    if (!currentUser) return requireLogin();
+
+    const relatedProducts = getLookbookProducts(selectedLookbook);
+
+    if (relatedProducts.length === 0) {
+      alert("這套穿搭還沒有綁定商品");
+      return;
+    }
+
+    const nextItems = [];
+
+    for (const product of relatedProducts) {
+      const selection = outfitSelections[product.id] || {};
+      const color = selection.color;
+      const size = selection.size;
+      const sizeOptions = getProductSizeOptionsByColor(product, color);
+      const selectedSizeOption = sizeOptions.find((item) => item.name === size);
+      const stock = Number(selectedSizeOption?.stock ?? 999);
+
+      if (!color || !size) {
+        alert(`請先選擇「${product.name}」的顏色與尺寸`);
+        return;
+      }
+
+      if (stock <= 0) {
+        alert(`「${product.name}」${color} / ${size} 目前缺貨`);
+        return;
+      }
+
+      nextItems.push({
+        key: `${product.id}-${color}-${size}`,
+        ...product,
+        color,
+        size,
+        stock,
+        qty: 1,
+      });
+    }
+
+    setCart((prev) => {
+      let nextCart = [...prev];
+
+      nextItems.forEach((newItem) => {
+        const exists = nextCart.find((item) => item.key === newItem.key);
+        if (exists) {
+          nextCart = nextCart.map((item) => (
+            item.key === newItem.key
+              ? { ...item, qty: Math.min(Number(item.stock ?? 999), item.qty + 1) }
+              : item
+          ));
+        } else {
+          nextCart.push(newItem);
+        }
+      });
+
+      return nextCart;
+    });
+
+    alert(`已加入 ${nextItems.length} 件穿搭商品到購物車`);
     setTab("cart");
   };
 
@@ -1115,49 +1258,113 @@ export default function JGoAppPrototype() {
                 商品載入中...
               </div>
             ) : (
-            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-7">
-              <section className="relative overflow-hidden rounded-[2.25rem] bg-neutral-950 text-white shadow-2xl">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_36%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.12),transparent_32%)]" />
-                <div className="grid gap-5 p-6">
-                  <div className="relative z-10 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-[11px] font-black tracking-[0.18em] text-neutral-200 backdrop-blur">
-                        J-GO AI LOOKBOOK
-                      </span>
-                      <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-neutral-900">BETA</span>
-                    </div>
-                    <div>
-                      <p className="mb-2 text-sm font-bold text-neutral-300">日本選品 × AI 穿搭靈感</p>
-                      <h2 className="text-[2.65rem] font-black leading-[0.95] tracking-tight">
-                        一張圖，買完整套日系穿搭。
-                      </h2>
-                    </div>
-                    <p className="max-w-xs text-sm leading-6 text-neutral-300">
-                      用 AI Lookbook 找風格，點進去直接看襯衫、褲子、外套與配件。
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+              <section className="relative overflow-hidden rounded-[2rem] bg-neutral-950 px-6 py-6 text-white shadow-xl">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.14),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(120,113,108,0.28),transparent_38%)]" />
+
+                {featuredProduct?.image && (
+                  <div className="absolute right-4 top-24 h-44 w-32 overflow-hidden rounded-[1.5rem] bg-white/10 shadow-2xl sm:h-48 sm:w-36">
+                    <img
+                      src={featuredProduct.image}
+                      alt={featuredProduct.name}
+                      className="h-full w-full object-cover opacity-75"
+                    />
+                  </div>
+                )}
+
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-black tracking-[0.18em] text-neutral-200 backdrop-blur">
+                      JAPAN STYLE SELECT
+                    </span>
+                    <span className="shrink-0 rounded-full bg-white px-3 py-1 text-[10px] font-black text-neutral-900">NEW DROP</span>
+                  </div>
+
+                  <div className="mt-9 max-w-[245px] space-y-4">
+                    <p className="text-sm font-bold text-neutral-300">日系男裝 × 中性穿搭 × 整套買</p>
+                    <h2 className="text-[2.7rem] font-black leading-[0.92] tracking-tight">
+                      Find your<br />Japan fit.
+                    </h2>
+                    <p className="max-w-[225px] text-sm leading-6 text-neutral-300">
+                      從 AI Lookbook 找靈感，依品牌、風格快速逛到整套穿搭。
                     </p>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 pt-1">
                       <Button onClick={() => setTab("lookbook")} className="h-11 rounded-2xl bg-white px-5 text-neutral-900 hover:bg-neutral-100">
-                        探索穿搭
+                        看穿搭
                       </Button>
                       <Button onClick={() => setTab("shop")} className="h-11 rounded-2xl bg-white/10 px-5 text-white hover:bg-white/20">
-                        逛商品
+                        逛新品
                       </Button>
                     </div>
                   </div>
 
-                  <div className="relative z-10 grid grid-cols-3 gap-2 rounded-[1.5rem] bg-white/10 p-2 backdrop-blur">
+                  <div className="mt-8 grid grid-cols-3 gap-2 rounded-[1.4rem] bg-white/10 p-2 backdrop-blur">
                     {[
                       { label: "LOOKS", value: lookbooks.length },
                       { label: "ITEMS", value: products.length },
-                      { label: "STYLE", value: "JP" },
+                      { label: "BRANDS", value: Math.max(0, brandOptions.length - 1) },
                     ].map((item) => (
-                      <div key={item.label} className="rounded-2xl bg-white/10 p-3 text-center">
+                      <div key={item.label} className="rounded-2xl bg-white/10 px-2 py-3 text-center">
                         <p className="text-lg font-black">{item.value}</p>
                         <p className="text-[10px] font-black tracking-widest text-neutral-300">{item.label}</p>
                       </div>
                     ))}
                   </div>
                 </div>
+              </section>
+
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-black tracking-widest text-neutral-400">SHOP BY BRAND</p>
+                    <h3 className="text-xl font-black">熱門品牌</h3>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setActiveBrand("all");
+                      setTab("shop");
+                    }}
+                    className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600"
+                  >
+                    全部品牌
+                  </button>
+                </div>
+
+                {homeBrandOptions.length === 0 ? (
+                  <div className="rounded-[2rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-500">
+                    商品載入後，這裡會自動顯示品牌分類。
+                  </div>
+                ) : (
+                  <div className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {homeBrandOptions.map((brand) => {
+                      const brandProducts = products.filter((product) => product.brand === brand);
+                      const coverProduct = brandProducts[0];
+
+                      return (
+                        <button
+                          key={brand}
+                          onClick={() => {
+                            setActiveBrand(brand);
+                            setTab("shop");
+                          }}
+                          className="group flex min-w-[145px] items-center gap-3 rounded-[1.5rem] bg-neutral-100 p-3 text-left transition active:scale-[0.98]"
+                        >
+                          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-white">
+                            {coverProduct?.image ? (
+                              <img src={coverProduct.image} alt={brand} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+                            ) : (
+                              <div className="h-full w-full bg-neutral-200" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="line-clamp-1 text-sm font-black text-neutral-900">{brand}</p>
+                            <p className="mt-1 text-[11px] font-bold text-neutral-500">{brandProducts.length} items</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </section>
 
               <section>
@@ -1226,8 +1433,8 @@ export default function JGoAppPrototype() {
               <section>
                 <div className="mb-3 flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-black tracking-widest text-neutral-400">SHOP THE LOOK</p>
-                    <h3 className="text-xl font-black">本週推薦商品</h3>
+                    <p className="text-xs font-black tracking-widest text-neutral-400">NEW ARRIVALS</p>
+                    <h3 className="text-xl font-black">新品上架</h3>
                   </div>
                   <button onClick={() => setTab("shop")} className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600">看全部</button>
                 </div>
@@ -1245,8 +1452,8 @@ export default function JGoAppPrototype() {
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-bold text-neutral-400">AI STYLE INSPIRATION</p>
-                  <h2 className="text-2xl font-black">AI LOOKBOOK</h2>
+                  <p className="text-sm font-bold tracking-widest text-neutral-400">STYLE FEED</p>
+                  <h2 className="text-3xl font-black">AI 穿搭靈感</h2>
                 </div>
                 <Button onClick={loadLookbooks} className="rounded-2xl bg-neutral-900 text-sm">刷新</Button>
               </div>
@@ -1275,47 +1482,166 @@ export default function JGoAppPrototype() {
                   <p className="mt-1 text-sm text-neutral-500">先到 Xano 新增 AI 穿搭圖片。</p>
                 </div>
               ) : (
-                <div className="space-y-5">
+                <div className="space-y-6">
                   {lookbooks
-                  .filter((lookbook) => activeGender === "all" || lookbook.gender === activeGender || (activeGender !== "all" && lookbook.gender === "unisex"))
-                  .map((lookbook) => {
-                    const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
+                    .filter((lookbook) => activeGender === "all" || lookbook.gender === activeGender || (activeGender !== "all" && lookbook.gender === "unisex"))
+                    .map((lookbook, index) => {
+                      const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
+                      const outfitTotal = relatedProducts.reduce((sum, product) => sum + Number(product.price || 0), 0);
 
-                    return (
-                      <Card key={lookbook.id} className="overflow-hidden rounded-[2rem] border-neutral-100 shadow-sm">
-                        <button
-                          onClick={() => {
-                            setSelectedLookbook(lookbook);
-                            setTab("lookbook-detail");
-                          }}
-                          className="block w-full text-left"
-                        >
-                          <img src={lookbook.image} alt={lookbook.title} className="h-[520px] w-full object-cover" />
-                          <CardContent className="space-y-3 p-4">
+                      return (
+                        <Card key={lookbook.id} className="overflow-hidden rounded-[2rem] border-neutral-100 shadow-sm">
+                          <div className="relative">
+                            <button
+                              onClick={() => {
+                                setSelectedLookbook(lookbook);
+                                setTab("lookbook-detail");
+                              }}
+                              className="block w-full text-left"
+                            >
+                              <img src={lookbook.image} alt={lookbook.title} className="h-[500px] w-full object-cover" />
+                            </button>
+
+                            <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1.5 text-sm font-black text-neutral-800 backdrop-blur">
+                              #{String(index + 1).padStart(2, "0")}
+                            </div>
+
+                            {relatedProducts.length > 0 && (
+                              <button
+                                onClick={() => openOutfitBuilder(lookbook)}
+                                className="absolute bottom-4 right-4 rounded-full bg-neutral-900/90 px-4 py-2 text-sm font-black text-white shadow-lg backdrop-blur active:scale-[0.98]"
+                              >
+                                🛍 整套買
+                              </button>
+                            )}
+                          </div>
+
+                          <CardContent className="space-y-4 p-4">
                             <div>
                               <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-600">{lookbook.tag}</span>
-                              <h3 className="mt-3 text-xl font-black">{lookbook.title}</h3>
+                              <h3 className="mt-3 text-2xl font-black leading-tight">{lookbook.title}</h3>
                             </div>
-                            {relatedProducts.length > 0 && (
-                              <div className="flex gap-2 overflow-x-auto pb-1">
-                                {relatedProducts.map((product) => (
-                                  <div key={product.id} className="flex min-w-[150px] items-center gap-2 rounded-2xl bg-neutral-50 p-2">
-                                    <img src={product.image} alt={product.name} className="h-12 w-12 rounded-xl object-cover" />
-                                    <div>
-                                      <p className="line-clamp-1 text-xs font-bold">{product.name}</p>
-                                      <p className="text-xs font-black">{formatPrice(product.price)}</p>
-                                    </div>
-                                  </div>
-                                ))}
+
+                            {relatedProducts.length > 0 ? (
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm font-black">本套商品</p>
+                                  <p className="text-sm font-bold text-neutral-500">{relatedProducts.length} 件商品</p>
+                                </div>
+
+                                <div className="grid grid-cols-4 gap-2">
+                                  {relatedProducts.slice(0, 4).map((product) => (
+                                    <button
+                                      key={product.id}
+                                      onClick={() => openProduct(product)}
+                                      className="text-left"
+                                    >
+                                      <div className="overflow-hidden rounded-2xl bg-neutral-100">
+                                        <img src={product.image} alt={product.name} className="h-20 w-full object-cover" />
+                                      </div>
+                                      <p className="mt-1 line-clamp-1 text-[11px] font-bold">{product.name}</p>
+                                      <p className="text-[11px] font-black">{formatPrice(product.price)}</p>
+                                    </button>
+                                  ))}
+                                </div>
+
+                                <Button
+                                  onClick={() => openOutfitBuilder(lookbook)}
+                                  className="h-12 w-full rounded-2xl bg-neutral-900 text-base"
+                                >
+                                  🛍 整套買・{formatPrice(outfitTotal)}
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="rounded-2xl bg-neutral-50 p-4 text-sm font-bold text-neutral-500">
+                                這套穿搭還沒有綁定商品。
                               </div>
                             )}
                           </CardContent>
-                        </button>
-                      </Card>
-                    );
-                  })}
+                        </Card>
+                      );
+                    })}
                 </div>
               )}
+            </motion.div>
+          )}
+
+          {tab === "outfit-builder" && selectedLookbook && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <button onClick={() => setTab("lookbook")} className="text-sm font-bold text-neutral-500">← 返回 LOOKBOOK</button>
+
+              <div className="overflow-hidden rounded-[2rem] bg-neutral-100">
+                <img src={selectedLookbook.image} alt={selectedLookbook.title} className="h-[420px] w-full object-cover" />
+              </div>
+
+              <div className="space-y-2">
+                <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-600">{selectedLookbook.tag}</span>
+                <h2 className="text-2xl font-black leading-tight">選擇整套尺寸</h2>
+                <p className="text-sm leading-6 text-neutral-500">每件商品都先選好顏色與尺寸，再加入整套到購物車。</p>
+              </div>
+
+              <div className="space-y-4">
+                {getLookbookProducts(selectedLookbook).map((product) => {
+                  const selection = outfitSelections[product.id] || getDefaultOutfitSelection(product);
+                  const colorOptions = product.variants?.length
+                    ? product.variants.map((variant) => variant.color).filter(Boolean)
+                    : product.colors || [];
+                  const sizeOptions = getProductSizeOptionsByColor(product, selection.color);
+                  const sizeNames = sizeOptions.map((item) => item.name);
+                  const disabledSizeNames = sizeOptions.filter((item) => Number(item.stock ?? 999) <= 0).map((item) => item.name);
+                  const stockMap = Object.fromEntries(sizeOptions.map((item) => [item.name, Number(item.stock ?? 999)]));
+
+                  return (
+                    <Card key={product.id} className="rounded-[2rem] border-neutral-100 shadow-sm">
+                      <CardContent className="space-y-4 p-4">
+                        <div className="flex gap-3">
+                          <button onClick={() => openProduct(product)} className="h-24 w-20 shrink-0 overflow-hidden rounded-2xl bg-neutral-100">
+                            <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-neutral-400">{product.brand}</p>
+                            <h3 className="line-clamp-2 font-black leading-tight">{product.name}</h3>
+                            <p className="mt-2 text-sm font-black">{formatPrice(product.price)}</p>
+                          </div>
+                        </div>
+
+                        <OptionGroup
+                          title="顏色"
+                          options={colorOptions}
+                          value={selection.color}
+                          setValue={(color) => {
+                            const nextSizeOptions = getProductSizeOptionsByColor(product, color);
+                            const nextSize = nextSizeOptions.find((item) => Number(item.stock ?? 999) > 0)?.name || nextSizeOptions[0]?.name || "";
+                            updateOutfitSelection(product.id, { color, size: nextSize });
+                          }}
+                        />
+
+                        <OptionGroup
+                          title="尺寸"
+                          options={sizeNames}
+                          value={selection.size}
+                          setValue={(size) => updateOutfitSelection(product.id, { size })}
+                          disabledOptions={disabledSizeNames}
+                          stockMap={stockMap}
+                        />
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              <div className="sticky bottom-20 z-10 rounded-[2rem] border border-neutral-100 bg-white/95 p-4 shadow-2xl backdrop-blur">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-black tracking-widest text-neutral-400">OUTFIT TOTAL</p>
+                    <p className="text-xl font-black">{formatPrice(getLookbookProducts(selectedLookbook).reduce((sum, product) => sum + Number(product.price || 0), 0))}</p>
+                  </div>
+                  <p className="text-sm font-bold text-neutral-500">{getLookbookProducts(selectedLookbook).length} 件商品</p>
+                </div>
+                <Button onClick={addOutfitSelectionsToCart} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
+                  🛍 加入整套購物車
+                </Button>
+              </div>
             </motion.div>
           )}
 
@@ -1350,6 +1676,26 @@ export default function JGoAppPrototype() {
               </div>
 
               <div className="space-y-2">
+                <p className="text-sm font-black">性別分類</p>
+                <div className="grid grid-cols-4 gap-2 rounded-2xl bg-neutral-100 p-1">
+                  {[
+                    { key: "all", label: "全部" },
+                    { key: "male", label: "男裝" },
+                    { key: "female", label: "女裝" },
+                    { key: "unisex", label: "中性" },
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      onClick={() => setActiveGender(item.key)}
+                      className={`rounded-xl py-2 text-xs font-black transition ${activeGender === item.key ? "bg-neutral-900 text-white shadow-sm" : "text-neutral-500"}`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
                 <p className="text-sm font-black">品牌分類</p>
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {brandOptions.map((brand) => (
@@ -1364,9 +1710,33 @@ export default function JGoAppPrototype() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                {filteredProducts.map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-bold text-neutral-500">
+                  共 {filteredProducts.length} 件商品
+                </p>
+                {(activeGender !== "all" || activeBrand !== "all") && (
+                  <button
+                    onClick={() => {
+                      setActiveGender("all");
+                      setActiveBrand("all");
+                    }}
+                    className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600"
+                  >
+                    清除篩選
+                  </button>
+                )}
               </div>
+
+              {filteredProducts.length === 0 ? (
+                <div className="rounded-[2rem] bg-neutral-50 p-8 text-center">
+                  <h3 className="font-black">目前沒有符合的商品</h3>
+                  <p className="mt-1 text-sm text-neutral-500">可以切換性別或品牌分類看看。</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  {filteredProducts.map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -1977,12 +2347,21 @@ export default function JGoAppPrototype() {
                 </CardContent>
               </Card>
 
-              <Button
-                onClick={() => refreshProductsFromXano({ useCache: false })}
-                className="h-12 w-full rounded-2xl bg-neutral-900 text-base"
-              >
-                重新同步 Xano 商品
-              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  onClick={recalculateAllProducts}
+                  className="h-12 rounded-2xl bg-red-600 text-base text-white"
+                >
+                  重算全部價格
+                </Button>
+
+                <Button
+                  onClick={() => refreshProductsFromXano({ useCache: false })}
+                  className="h-12 rounded-2xl bg-neutral-900 text-base text-white"
+                >
+                  同步商品
+                </Button>
+              </div>
 
               <div className="space-y-3">
                 {products.map((product) => (
@@ -2194,7 +2573,7 @@ export default function JGoAppPrototype() {
 
         <nav className="sticky bottom-0 grid grid-cols-5 border-t bg-white px-2 py-2">
           <NavButton active={tab === "home"} icon={<Home size={20} />} label="首頁" onClick={() => setTab("home")} />
-          <NavButton active={tab === "lookbook" || tab === "lookbook-detail"} icon={<Sparkles size={20} />} label="穿搭" onClick={() => setTab("lookbook")} />
+          <NavButton active={tab === "lookbook" || tab === "lookbook-detail" || tab === "outfit-builder"} icon={<Sparkles size={20} />} label="穿搭" onClick={() => setTab("lookbook")} />
           <NavButton active={tab === "shop"} icon={<Search size={20} />} label="商品" onClick={() => setTab("shop")} />
           <NavButton active={tab === "cart"} icon={<ShoppingBag size={20} />} label="購物車" onClick={() => setTab("cart")} />
           <NavButton

@@ -126,6 +126,12 @@ export default function JGoAppPrototype() {
     variants: "",
     gender: "unisex",
     tag: "日本選品",
+    description: "",
+    material: "",
+    fit: "",
+    model_info: "",
+    size_chart: "",
+    care: "",
   });
   const [editingProductId, setEditingProductId] = useState(null);
   const isAdmin = currentUser?.email === "panzol034535@gmail.com";
@@ -243,6 +249,12 @@ export default function JGoAppPrototype() {
           : [],
         tag: product.tag || "日本選品",
         gender: product.gender || "unisex",
+        description: product.description || "",
+        material: product.material || "",
+        fit: product.fit || "",
+        modelInfo: product.model_info || "",
+        sizeChart: product.size_chart || "",
+        care: product.care || "",
       };
     });
   };
@@ -425,6 +437,12 @@ export default function JGoAppPrototype() {
       variants: "",
       gender: "unisex",
       tag: "日本選品",
+      description: "",
+      material: "",
+      fit: "",
+      model_info: "",
+      size_chart: "",
+      care: "",
     });
     setEditingProductId(null);
   };
@@ -449,6 +467,12 @@ export default function JGoAppPrototype() {
       variants: productVariantsToText(product),
       gender: product.gender || "unisex",
       tag: product.tag || "日本選品",
+      description: product.description || "",
+      material: product.material || "",
+      fit: product.fit || "",
+      model_info: product.modelInfo || "",
+      size_chart: product.sizeChart || "",
+      care: product.care || "",
     });
   };
 
@@ -498,6 +522,12 @@ export default function JGoAppPrototype() {
         variants: productForm.variants,
         gender: productForm.gender,
         tag: productForm.tag || "日本選品",
+        description: productForm.description,
+        material: productForm.material,
+        fit: productForm.fit,
+        model_info: productForm.model_info,
+        size_chart: productForm.size_chart,
+        care: productForm.care,
       };
 
       const response = await fetch(editingProductId ? XANO_ADMIN_UPDATE_PRODUCT_URL : XANO_ADMIN_CREATE_PRODUCT_URL, {
@@ -1815,6 +1845,40 @@ export default function JGoAppPrototype() {
               {selectedSize && selectedSizeStock <= 0 && (
                 <p className="text-sm font-bold text-red-500">此尺寸目前缺貨</p>
               )}
+              {(selectedProduct.description || selectedProduct.material || selectedProduct.fit || selectedProduct.modelInfo || selectedProduct.sizeChart || selectedProduct.care) && (
+                <Card className="rounded-3xl border-neutral-100 bg-neutral-50 shadow-sm">
+                  <CardContent className="space-y-5 p-5">
+                    <div>
+                      <p className="text-xs font-black tracking-widest text-neutral-400">PRODUCT DETAILS</p>
+                      <h3 className="mt-1 text-lg font-black">商品介紹與尺寸表</h3>
+                    </div>
+
+                    {selectedProduct.description && (
+                      <DetailBlock title="商品介紹" text={selectedProduct.description} />
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      {selectedProduct.material && <DetailBlock title="材質" text={selectedProduct.material} />}
+                      {selectedProduct.fit && <DetailBlock title="版型" text={selectedProduct.fit} />}
+                    </div>
+
+                    {selectedProduct.modelInfo && (
+                      <DetailBlock title="Model 參考" text={selectedProduct.modelInfo} />
+                    )}
+
+                    {selectedProduct.sizeChart && (
+                      <div>
+                        <p className="mb-2 text-sm font-black">尺寸表</p>
+                        <pre className="whitespace-pre-wrap rounded-2xl bg-white p-4 text-sm leading-6 text-neutral-700">{selectedProduct.sizeChart}</pre>
+                      </div>
+                    )}
+
+                    {selectedProduct.care && (
+                      <DetailBlock title="洗滌方式" text={selectedProduct.care} />
+                    )}
+                  </CardContent>
+                </Card>
+              )}
               <Card className="rounded-3xl border-neutral-100 bg-neutral-50 shadow-sm">
                 <CardContent className="space-y-4 p-4">
                   <div className="flex items-center gap-2">
@@ -2334,6 +2398,21 @@ export default function JGoAppPrototype() {
                     </label>
                     <Input label="Tag" placeholder="日本選品" value={productForm.tag} onChange={(value) => setProductForm({ ...productForm, tag: value })} />
                   </div>
+
+                  <div className="rounded-3xl bg-neutral-50 p-4 space-y-3">
+                    <div>
+                      <p className="text-xs font-black tracking-widest text-neutral-400">PRODUCT DETAILS</p>
+                      <h4 className="font-black">商品詳細資訊</h4>
+                    </div>
+                    <TextArea label="商品介紹" placeholder="日系寬版短袖襯衫，適合單穿或外搭..." value={productForm.description} onChange={(value) => setProductForm({ ...productForm, description: value })} />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input label="材質" placeholder="棉 / 聚酯纖維" value={productForm.material} onChange={(value) => setProductForm({ ...productForm, material: value })} />
+                      <Input label="版型" placeholder="寬鬆 / 落肩" value={productForm.fit} onChange={(value) => setProductForm({ ...productForm, fit: value })} />
+                    </div>
+                    <Input label="Model 資訊" placeholder="178cm / 65kg 著用 L size" value={productForm.model_info} onChange={(value) => setProductForm({ ...productForm, model_info: value })} />
+                    <TextArea label="尺寸表" placeholder={"M：肩寬 54 / 胸寬 62 / 衣長 72\nL：肩寬 56 / 胸寬 64 / 衣長 74"} value={productForm.size_chart} onChange={(value) => setProductForm({ ...productForm, size_chart: value })} />
+                    <TextArea label="洗滌方式" placeholder="建議反面洗滌，低溫水洗，避免烘乾。" value={productForm.care} onChange={(value) => setProductForm({ ...productForm, care: value })} />
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <Button onClick={createProduct} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
                       {editingProductId ? "更新商品" : "新增商品"}
@@ -2634,6 +2713,31 @@ function OptionGroup({ title, options, value, setValue, disabledOptions = [], st
         })}
       </div>
     </section>
+  );
+}
+
+function DetailBlock({ title, text }) {
+  if (!text) return null;
+
+  return (
+    <div>
+      <p className="mb-1 text-sm font-black">{title}</p>
+      <p className="whitespace-pre-wrap text-sm leading-6 text-neutral-600">{text}</p>
+    </div>
+  );
+}
+
+function TextArea({ label, placeholder, value, onChange }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-bold">{label}</span>
+      <textarea
+        className="min-h-[96px] w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm leading-6 outline-none focus:border-neutral-900"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange?.(e.target.value)}
+      />
+    </label>
   );
 }
 
