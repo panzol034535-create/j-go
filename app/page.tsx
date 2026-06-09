@@ -1364,6 +1364,14 @@ export default function JGoAppPrototype() {
     }
   };
 
+
+  const homeLookbookImages = lookbooks.map((lookbook) => lookbook.image).filter(Boolean);
+  const heroLeftImage = homeLookbookImages[0] || products.find((product) => product.gender === "male")?.image || products[0]?.image;
+  const heroRightImage = homeLookbookImages[1] || products.find((product) => product.gender === "female")?.image || products[1]?.image || products[0]?.image;
+  const categoryMenImage = homeLookbookImages[0] || products.find((product) => product.gender === "male")?.image || products[0]?.image;
+  const categoryWomenImage = homeLookbookImages[1] || products.find((product) => product.gender === "female")?.image || products[1]?.image || products[0]?.image;
+  const categoryUnisexImage = homeLookbookImages[2] || products.find((product) => product.gender === "unisex")?.image || products[2]?.image || products[0]?.image;
+
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
       <div className="mx-auto flex min-h-screen max-w-md flex-col bg-white shadow-2xl">
@@ -1404,9 +1412,9 @@ export default function JGoAppPrototype() {
 
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { key: "male", title: "男生日系", sub: "SHOP MEN", image: products.find((product) => product.gender === "male")?.image || products[0]?.image },
-                    { key: "female", title: "女生日系", sub: "SHOP WOMEN", image: products.find((product) => product.gender === "female")?.image || products[1]?.image || products[0]?.image },
-                    { key: "unisex", title: "中性穿搭", sub: "SHOP UNISEX", image: products.find((product) => product.gender === "unisex")?.image || products[2]?.image || products[0]?.image },
+                    { key: "male", title: "男生日系", sub: "SHOP MEN", image: categoryMenImage },
+                    { key: "female", title: "女生日系", sub: "SHOP WOMEN", image: categoryWomenImage },
+                    { key: "unisex", title: "中性穿搭", sub: "SHOP UNISEX", image: categoryUnisexImage },
                   ].map((item) => (
                     <button
                       key={item.key}
@@ -1431,14 +1439,14 @@ export default function JGoAppPrototype() {
               <section className="relative overflow-hidden rounded-[2rem] bg-neutral-900 shadow-2xl">
                 <div className="absolute inset-0 grid grid-cols-2">
                   <div className="relative overflow-hidden">
-                    {(products.find((product) => product.gender === "male")?.image || products[0]?.image) && (
-                      <img src={products.find((product) => product.gender === "male")?.image || products[0]?.image} alt="J-GO men style" className="h-full w-full object-cover" />
+                    {heroLeftImage && (
+                      <img src={heroLeftImage} alt="J-GO lookbook hero left" className="h-full w-full object-cover" />
                     )}
                     <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/25 to-transparent" />
                   </div>
                   <div className="relative overflow-hidden">
-                    {(products.find((product) => product.gender === "female")?.image || products[1]?.image || products[0]?.image) && (
-                      <img src={products.find((product) => product.gender === "female")?.image || products[1]?.image || products[0]?.image} alt="J-GO women style" className="h-full w-full object-cover" />
+                    {heroRightImage && (
+                      <img src={heroRightImage} alt="J-GO lookbook hero right" className="h-full w-full object-cover" />
                     )}
                     <div className="absolute inset-0 bg-gradient-to-l from-black/25 via-black/10 to-transparent" />
                   </div>
