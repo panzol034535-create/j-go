@@ -1392,111 +1392,171 @@ export default function JGoAppPrototype() {
                 商品載入中...
               </div>
             ) : (
-            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-              <section className="space-y-3">
-                <div className="flex items-center gap-2 rounded-[1.6rem] bg-neutral-100 px-4 py-3">
-                  <Search size={18} className="text-neutral-400" />
-                  <button onClick={() => setTab("shop")} className="flex-1 text-left text-sm font-bold text-neutral-400">
-                    搜尋品牌、商品或穿搭靈感
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+              <section className="relative overflow-hidden rounded-[2rem] bg-neutral-950 px-6 py-6 text-white shadow-xl">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.14),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(120,113,108,0.28),transparent_38%)]" />
+
+                {featuredProduct?.image && (
+                  <div className="absolute right-4 top-24 h-44 w-32 overflow-hidden rounded-[1.5rem] bg-white/10 shadow-2xl sm:h-48 sm:w-36">
+                    <img
+                      src={featuredProduct.image}
+                      alt={featuredProduct.name}
+                      className="h-full w-full object-cover opacity-75"
+                    />
+                  </div>
+                )}
+
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-black tracking-[0.18em] text-neutral-200 backdrop-blur">
+                      JAPAN STYLE SELECT
+                    </span>
+                    <span className="shrink-0 rounded-full bg-white px-3 py-1 text-[10px] font-black text-neutral-900">NEW DROP</span>
+                  </div>
+
+                  <div className="mt-9 max-w-[245px] space-y-4">
+                    <p className="text-sm font-bold text-neutral-300">日系男裝 × 中性穿搭 × 整套買</p>
+                    <h2 className="text-[2.7rem] font-black leading-[0.92] tracking-tight">
+                      Find your<br />Japan fit.
+                    </h2>
+                    <p className="max-w-[225px] text-sm leading-6 text-neutral-300">
+                      從 AI Lookbook 找靈感，依品牌、風格快速逛到整套穿搭。
+                    </p>
+                    <div className="flex gap-2 pt-1">
+                      <Button onClick={() => setTab("lookbook")} className="h-11 rounded-2xl bg-white px-5 text-neutral-900 hover:bg-neutral-100">
+                        看穿搭
+                      </Button>
+                      <Button onClick={() => setTab("shop")} className="h-11 rounded-2xl bg-white/10 px-5 text-white hover:bg-white/20">
+                        逛新品
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 grid grid-cols-3 gap-2 rounded-[1.4rem] bg-white/10 p-2 backdrop-blur">
+                    {[
+                      { label: "LOOKS", value: lookbooks.length },
+                      { label: "ITEMS", value: products.length },
+                      { label: "BRANDS", value: Math.max(0, brandOptions.length - 1) },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-2xl bg-white/10 px-2 py-3 text-center">
+                        <p className="text-lg font-black">{item.value}</p>
+                        <p className="text-[10px] font-black tracking-widest text-neutral-300">{item.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-black tracking-widest text-neutral-400">SHOP BY BRAND</p>
+                    <h3 className="text-xl font-black">熱門品牌</h3>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setActiveBrand("all");
+                      setTab("shop");
+                    }}
+                    className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600"
+                  >
+                    全部品牌
                   </button>
                 </div>
 
+                {homeBrandOptions.length === 0 ? (
+                  <div className="rounded-[2rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-500">
+                    商品載入後，這裡會自動顯示品牌分類。
+                  </div>
+                ) : (
+                  <div className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {homeBrandOptions.map((brand) => {
+                      const brandProducts = products.filter((product) => product.brand === brand);
+                      const coverProduct = brandProducts[0];
+
+                      return (
+                        <button
+                          key={brand}
+                          onClick={() => {
+                            setActiveBrand(brand);
+                            setTab("shop");
+                          }}
+                          className="group flex min-w-[145px] items-center gap-3 rounded-[1.5rem] bg-neutral-100 p-3 text-left transition active:scale-[0.98]"
+                        >
+                          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-white">
+                            {coverProduct?.image ? (
+                              <img src={coverProduct.image} alt={brand} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+                            ) : (
+                              <div className="h-full w-full bg-neutral-200" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="line-clamp-1 text-sm font-black text-neutral-900">{brand}</p>
+                            <p className="mt-1 text-[11px] font-bold text-neutral-500">{brandProducts.length} items</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="mb-3 flex items-end justify-between">
+                  <div>
+                    <p className="text-xs font-black tracking-widest text-neutral-400">SHOP BY STYLE</p>
+                    <h3 className="text-xl font-black">選你的穿搭方向</h3>
+                  </div>
+                </div>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    {
-                      key: "male",
-                      title: "男生日系",
-                      sub: "SHOP MEN",
-                      image: products.find((product) => product.gender === "male")?.image || products[0]?.image,
-                    },
-                    {
-                      key: "female",
-                      title: "女生日系",
-                      sub: "SHOP WOMEN",
-                      image: products.find((product) => product.gender === "female")?.image || products[1]?.image || products[0]?.image,
-                    },
-                    {
-                      key: "unisex",
-                      title: "中性穿搭",
-                      sub: "SHOP UNISEX",
-                      image: products.find((product) => product.gender === "unisex")?.image || products[2]?.image || products[0]?.image,
-                    },
+                    { key: "male", label: "MEN", sub: "男生日系", tone: "bg-neutral-900 text-white" },
+                    { key: "female", label: "WOMEN", sub: "女生穿搭", tone: "bg-neutral-100 text-neutral-900" },
+                    { key: "unisex", label: "UNISEX", sub: "中性寬鬆", tone: "bg-stone-100 text-neutral-900" },
                   ].map((item) => (
                     <button
                       key={item.key}
                       onClick={() => {
                         setActiveGender(item.key);
-                        setActiveBrand("all");
-                        setTab("shop");
+                        setTab("lookbook");
                       }}
-                      className="relative h-20 overflow-hidden rounded-[1.45rem] bg-neutral-100 p-3 text-left shadow-sm transition active:scale-[0.98]"
+                      className={`rounded-[1.6rem] p-4 text-left shadow-sm transition active:scale-[0.98] ${item.tone}`}
                     >
-                      {item.image && (
-                        <img src={item.image} alt={item.title} className="absolute bottom-0 right-0 h-full w-16 object-cover opacity-80" />
-                      )}
-                      <div className="relative z-10">
-                        <p className="text-sm font-black leading-tight text-neutral-900">{item.title}</p>
-                        <p className="mt-1 text-[9px] font-black tracking-widest text-neutral-400">{item.sub}</p>
-                      </div>
+                      <p className="text-lg font-black tracking-tight">{item.label}</p>
+                      <p className="mt-1 text-[11px] font-bold opacity-70">{item.sub}</p>
                     </button>
                   ))}
-                </div>
-              </section>
-
-              <section className="relative overflow-hidden rounded-[2rem] bg-neutral-200 shadow-xl">
-                <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.5),rgba(0,0,0,0.08),rgba(255,255,255,0.18))]" />
-                <div className="absolute inset-0 grid grid-cols-2">
-                  {products[0]?.image && <img src={products[0].image} alt="J-GO hero men" className="h-full w-full object-cover" />}
-                  {(products[1]?.image || products[0]?.image) && <img src={products[1]?.image || products[0]?.image} alt="J-GO hero women" className="h-full w-full object-cover" />}
-                </div>
-                <div className="relative z-10 min-h-[250px] px-6 py-6 text-white">
-                  <div className="flex justify-end">
-                    <span className="rounded-full bg-neutral-900 px-3 py-1 text-[10px] font-black text-white shadow-sm">NEW DROP</span>
-                  </div>
-                  <div className="mt-8 max-w-[250px]">
-                    <p className="text-xs font-bold text-white/90">日系穿搭 × AI LOOKBOOK × 整套購買</p>
-                    <h2 className="mt-2 text-[2.45rem] font-black leading-[0.95] tracking-tight">
-                      Find your<br />Japan fit.
-                    </h2>
-                    <p className="mt-3 text-sm font-bold leading-6 text-white/85">
-                      從 AI Lookbook 找靈感，依品牌、風格快速逛到整套穿搭。
-                    </p>
-                    <button
-                      onClick={() => setTab("lookbook")}
-                      className="mt-4 rounded-2xl bg-white px-5 py-3 text-sm font-black text-neutral-900 shadow-lg active:scale-[0.98]"
-                    >
-                      探索穿搭靈感 →
-                    </button>
-                  </div>
                 </div>
               </section>
 
               {lookbooks.length > 0 && (
                 <section>
                   <div className="mb-3 flex items-center justify-between">
-                    <h3 className="text-lg font-black">本週熱門穿搭</h3>
-                    <button onClick={() => setTab("lookbook")} className="text-xs font-black text-neutral-500">查看全部 ›</button>
+                    <div>
+                      <p className="text-xs font-black tracking-widest text-neutral-400">STYLE FEED</p>
+                      <h3 className="text-xl font-black">AI 穿搭靈感</h3>
+                    </div>
+                    <button onClick={() => setTab("lookbook")} className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600">看全部</button>
                   </div>
-
-                  <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
-                    {lookbooks.slice(0, 4).map((lookbook, index) => (
+                  <div className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {lookbooks.slice(0, 5).map((lookbook, index) => (
                       <button
                         key={lookbook.id}
                         onClick={() => {
                           setSelectedLookbook(lookbook);
                           setTab("lookbook-detail");
                         }}
-                        className="relative h-44 min-w-[130px] overflow-hidden rounded-[1.5rem] bg-neutral-100 text-left shadow-sm active:scale-[0.98]"
+                        className="group min-w-[210px] overflow-hidden rounded-[2rem] bg-neutral-100 text-left shadow-sm transition active:scale-[0.99]"
                       >
-                        <img src={lookbook.image} alt={lookbook.title} className="h-full w-full object-cover" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                        <span className="absolute left-2 top-2 rounded-full bg-neutral-900 px-2 py-1 text-[9px] font-black text-white">
-                          {String(index + 1).padStart(2, "0")}
-                        </span>
-                        <div className="absolute bottom-3 left-3 right-3 text-white">
-                          <p className="text-xs font-black tracking-wide">{lookbook.tag || "STYLE"}</p>
-                          <p className="mt-1 line-clamp-2 text-xs font-bold text-white/85">{lookbook.title}</p>
-                          <span className="mt-2 inline-block rounded-full bg-white/90 px-2 py-1 text-[9px] font-black text-neutral-900">查看整套</span>
+                        <div className="relative">
+                          <img src={lookbook.image} alt={lookbook.title} className="h-72 w-full object-cover transition duration-500 group-hover:scale-105" />
+                          <div className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-[10px] font-black text-neutral-700 backdrop-blur">
+                            #{String(index + 1).padStart(2, "0")}
+                          </div>
+                        </div>
+                        <div className="space-y-2 p-3">
+                          <span className="rounded-full bg-white px-2 py-1 text-[10px] font-black text-neutral-600">{lookbook.tag}</span>
+                          <p className="line-clamp-2 font-black leading-tight">{lookbook.title}</p>
                         </div>
                       </button>
                     ))}
@@ -1506,93 +1566,11 @@ export default function JGoAppPrototype() {
 
               <section>
                 <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-lg font-black">熱門品牌</h3>
-                  <button
-                    onClick={() => {
-                      setActiveBrand("all");
-                      setTab("shop");
-                    }}
-                    className="text-xs font-black text-neutral-500"
-                  >
-                    查看全部品牌 ›
-                  </button>
-                </div>
-
-                <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
-                  {homeBrandOptions.slice(0, 6).map((brand) => (
-                    <button
-                      key={brand}
-                      onClick={() => {
-                        setActiveBrand(brand);
-                        setActiveGender("all");
-                        setTab("shop");
-                      }}
-                      className="min-w-[72px] text-center active:scale-[0.98]"
-                    >
-                      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-100 text-xs font-black text-neutral-900 shadow-sm">
-                        {brand.length > 7 ? brand.slice(0, 7) : brand}
-                      </div>
-                      <p className="mt-2 line-clamp-1 text-[10px] font-bold text-neutral-500">{brand}</p>
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => {
-                      setActiveBrand("all");
-                      setTab("shop");
-                    }}
-                    className="min-w-[72px] text-center active:scale-[0.98]"
-                  >
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-100 text-2xl font-black text-neutral-400 shadow-sm">⌘</div>
-                    <p className="mt-2 text-[10px] font-bold text-neutral-500">更多品牌</p>
-                  </button>
-                </div>
-              </section>
-
-              <section className="grid grid-cols-3 gap-2">
-                {[
-                  {
-                    title: "AI 尺寸推薦",
-                    text: "輸入身高體重，找出最適合你的尺寸",
-                    action: "立即推薦 →",
-                    image: products[0]?.image,
-                    tab: "shop",
-                  },
-                  {
-                    title: "整套購買更優惠",
-                    text: "一鍵購買整套穿搭，享受組合優惠",
-                    action: "去逛逛 →",
-                    image: products[1]?.image || products[0]?.image,
-                    tab: "lookbook",
-                  },
-                  {
-                    title: "日本流行情報",
-                    text: "掌握日本最新流行趨勢與選品更新",
-                    action: "查看本週趨勢 →",
-                    image: products[2]?.image || products[0]?.image,
-                    tab: "lookbook",
-                  },
-                ].map((card) => (
-                  <button
-                    key={card.title}
-                    onClick={() => setTab(card.tab)}
-                    className="relative min-h-[105px] overflow-hidden rounded-[1.35rem] bg-neutral-100 p-3 text-left shadow-sm active:scale-[0.98]"
-                  >
-                    {card.image && <img src={card.image} alt={card.title} className="absolute bottom-0 right-0 h-16 w-16 object-cover opacity-35" />}
-                    <div className="relative z-10">
-                      <p className="text-xs font-black leading-tight">{card.title}</p>
-                      <p className="mt-1 line-clamp-2 text-[10px] font-bold leading-4 text-neutral-500">{card.text}</p>
-                      <span className="mt-3 inline-block rounded-full bg-neutral-900 px-2.5 py-1 text-[9px] font-black text-white">
-                        {card.action}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </section>
-
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-lg font-black">新品上架</h3>
-                  <button onClick={() => setTab("shop")} className="text-xs font-black text-neutral-500">看全部 ›</button>
+                  <div>
+                    <p className="text-xs font-black tracking-widest text-neutral-400">NEW ARRIVALS</p>
+                    <h3 className="text-xl font-black">新品上架</h3>
+                  </div>
+                  <button onClick={() => setTab("shop")} className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600">看全部</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   {filteredProducts
