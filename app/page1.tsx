@@ -1365,28 +1365,12 @@ export default function JGoAppPrototype() {
   };
 
 
-  const normalizeGender = (value) => String(value || "").trim().toLowerCase();
-
-  const maleLookbook =
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "male") ||
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "men");
-
-  const femaleLookbook =
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "female") ||
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "women");
-
-  const unisexLookbook =
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "unisex");
-
-  const maleProductImage = products.find((product) => normalizeGender(product.gender) === "male")?.image || products[0]?.image;
-  const femaleProductImage = products.find((product) => normalizeGender(product.gender) === "female")?.image || products[1]?.image || products[0]?.image;
-  const unisexProductImage = products.find((product) => normalizeGender(product.gender) === "unisex")?.image || products[2]?.image || products[0]?.image;
-
-  const heroLeftImage = maleLookbook?.image || maleProductImage;
-  const heroRightImage = femaleLookbook?.image || femaleProductImage;
-  const categoryMenImage = maleLookbook?.image || maleProductImage;
-  const categoryWomenImage = femaleLookbook?.image || femaleProductImage;
-  const categoryUnisexImage = unisexLookbook?.image || unisexProductImage;
+  const homeLookbookImages = lookbooks.map((lookbook) => lookbook.image).filter(Boolean);
+  const heroLeftImage = homeLookbookImages[0] || products.find((product) => product.gender === "male")?.image || products[0]?.image;
+  const heroRightImage = homeLookbookImages[1] || products.find((product) => product.gender === "female")?.image || products[1]?.image || products[0]?.image;
+  const categoryMenImage = homeLookbookImages[0] || products.find((product) => product.gender === "male")?.image || products[0]?.image;
+  const categoryWomenImage = homeLookbookImages[1] || products.find((product) => product.gender === "female")?.image || products[1]?.image || products[0]?.image;
+  const categoryUnisexImage = homeLookbookImages[2] || products.find((product) => product.gender === "unisex")?.image || products[2]?.image || products[0]?.image;
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
@@ -1441,7 +1425,7 @@ export default function JGoAppPrototype() {
                       }}
                       className="relative h-[82px] overflow-hidden rounded-[1.6rem] bg-gradient-to-br from-white to-neutral-100 p-3 text-left shadow-[0_12px_30px_rgba(0,0,0,0.08)] ring-1 ring-neutral-100 transition active:scale-[0.98]"
                     >
-                      {item.image && <img src={item.image} alt={item.title} className="absolute inset-y-0 right-0 h-full w-[82px] object-cover object-top opacity-90" />}
+                      {item.image && <img src={item.image} alt={item.title} className="absolute bottom-0 right-0 h-[86px] w-[72px] object-cover opacity-85" />}
                       <div className="absolute inset-0 bg-gradient-to-r from-white via-white/90 to-white/10" />
                       <div className="relative z-10">
                         <p className="text-[15px] font-black leading-tight text-neutral-950">{item.title}</p>
@@ -1456,13 +1440,13 @@ export default function JGoAppPrototype() {
                 <div className="absolute inset-0 grid grid-cols-2">
                   <div className="relative overflow-hidden">
                     {heroLeftImage && (
-                      <img src={heroLeftImage} alt="J-GO lookbook hero left" className="h-full w-full object-cover object-top" />
+                      <img src={heroLeftImage} alt="J-GO lookbook hero left" className="h-full w-full object-cover" />
                     )}
                     <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/25 to-transparent" />
                   </div>
                   <div className="relative overflow-hidden">
                     {heroRightImage && (
-                      <img src={heroRightImage} alt="J-GO lookbook hero right" className="h-full w-full object-cover object-top" />
+                      <img src={heroRightImage} alt="J-GO lookbook hero right" className="h-full w-full object-cover" />
                     )}
                     <div className="absolute inset-0 bg-gradient-to-l from-black/25 via-black/10 to-transparent" />
                   </div>
