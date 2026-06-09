@@ -1539,7 +1539,7 @@ export default function JGoAppPrototype() {
                   </button>
                 </div>
 
-                <div className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none]">
+                <div className="flex gap-4 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
                   {homeBrandOptions.slice(0, 6).map((brand) => (
                     <button
                       key={brand}
@@ -1548,16 +1548,12 @@ export default function JGoAppPrototype() {
                         setActiveGender("all");
                         setTab("shop");
                       }}
-                      className="min-w-[82px] text-center transition active:scale-[0.98]"
+                      className="min-w-[70px] text-center transition active:scale-[0.98]"
                     >
-                      <div className="mx-auto flex h-[76px] w-[76px] items-center justify-center rounded-full bg-gradient-to-br from-white to-neutral-100 px-2 text-center text-[11px] font-black leading-tight text-neutral-900 shadow-[0_12px_28px_rgba(0,0,0,0.08)] ring-1 ring-neutral-100">
-                        <span className="max-w-[58px] whitespace-normal break-words">
-                          {brand}
-                        </span>
+                      <div className="flex h-[68px] w-[68px] items-center justify-center rounded-full bg-gradient-to-br from-white to-neutral-100 px-2 text-xs font-black text-neutral-900 shadow-[0_12px_28px_rgba(0,0,0,0.08)] ring-1 ring-neutral-100">
+                        <span className="line-clamp-2">{brand.length > 9 ? brand.slice(0, 9) : brand}</span>
                       </div>
-                      <p className="mx-auto mt-2 max-w-[78px] truncate text-[11px] font-bold text-neutral-500">
-                        {brand}
-                      </p>
+                      <p className="mt-2 line-clamp-1 text-[10px] font-bold text-neutral-500">{brand}</p>
                     </button>
                   ))}
                   <button
@@ -1565,10 +1561,10 @@ export default function JGoAppPrototype() {
                       setActiveBrand("all");
                       setTab("shop");
                     }}
-                    className="min-w-[82px] text-center transition active:scale-[0.98]"
+                    className="min-w-[70px] text-center transition active:scale-[0.98]"
                   >
-                    <div className="mx-auto flex h-[76px] w-[76px] items-center justify-center rounded-full bg-gradient-to-br from-white to-neutral-100 text-2xl font-black text-neutral-400 shadow-[0_12px_28px_rgba(0,0,0,0.08)] ring-1 ring-neutral-100">▦</div>
-                    <p className="mt-2 text-[11px] font-bold text-neutral-500">更多品牌</p>
+                    <div className="flex h-[68px] w-[68px] items-center justify-center rounded-full bg-gradient-to-br from-white to-neutral-100 text-2xl font-black text-neutral-400 shadow-[0_12px_28px_rgba(0,0,0,0.08)] ring-1 ring-neutral-100">▦</div>
+                    <p className="mt-2 text-[10px] font-bold text-neutral-500">更多品牌</p>
                   </button>
                 </div>
               </section>
