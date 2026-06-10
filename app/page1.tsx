@@ -1382,20 +1382,11 @@ export default function JGoAppPrototype() {
   const femaleProductImage = products.find((product) => normalizeGender(product.gender) === "female")?.image || products[1]?.image || products[0]?.image;
   const unisexProductImage = products.find((product) => normalizeGender(product.gender) === "unisex")?.image || products[2]?.image || products[0]?.image;
 
+  const heroLeftImage = maleLookbook?.image || maleProductImage;
+  const heroRightImage = femaleLookbook?.image || femaleProductImage;
   const categoryMenImage = maleLookbook?.image || maleProductImage;
   const categoryWomenImage = femaleLookbook?.image || femaleProductImage;
   const categoryUnisexImage = unisexLookbook?.image || unisexProductImage;
-
-  // 首頁 Hero 改成單張固定主圖，避免左右兩張直式圖重疊或資料刷新時跳動。
-  // 優先抓 Lookbook 圖，不用商品清單順序當 Hero，避免新增/重算商品後主圖一直換。
-  const heroImage =
-    maleLookbook?.image ||
-    femaleLookbook?.image ||
-    unisexLookbook?.image ||
-    lookbooks[0]?.image ||
-    maleProductImage ||
-    femaleProductImage ||
-    unisexProductImage;
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
@@ -1462,24 +1453,31 @@ export default function JGoAppPrototype() {
               </section>
 
               <section className="relative overflow-hidden rounded-[2rem] bg-neutral-900 shadow-2xl">
-                {heroImage && (
-                  <img
-                    src={heroImage}
-                    alt="J-GO lookbook hero"
-                    className="absolute inset-0 h-full w-full object-cover object-top"
-                  />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/10" />
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.18),transparent_30%)]" />
+                <div className="absolute inset-0 grid grid-cols-2">
+                  <div className="relative overflow-hidden">
+                    {heroLeftImage && (
+                      <img src={heroLeftImage} alt="J-GO lookbook hero left" className="h-full w-full object-cover object-top" />
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/25 to-transparent" />
+                  </div>
+                  <div className="relative overflow-hidden">
+                    {heroRightImage && (
+                      <img src={heroRightImage} alt="J-GO lookbook hero right" className="h-full w-full object-cover object-top" />
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-l from-black/25 via-black/10 to-transparent" />
+                  </div>
+                </div>
 
-                <div className="relative z-10 min-h-[320px] px-6 py-5 text-white">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_55%_35%,rgba(255,255,255,0.2),transparent_28%),linear-gradient(90deg,rgba(0,0,0,0.45),rgba(0,0,0,0.12),rgba(0,0,0,0.05))]" />
+
+                <div className="relative z-10 min-h-[280px] px-6 py-5 text-white">
                   <div className="flex justify-end">
                     <span className="rounded-full bg-neutral-950/90 px-4 py-1.5 text-[10px] font-black text-white shadow-lg backdrop-blur">NEW DROP</span>
                   </div>
 
-                  <div className="mt-16 max-w-[285px]">
+                  <div className="mt-9 max-w-[280px]">
                     <p className="text-sm font-black text-white/90">日系穿搭 × AI LOOKBOOK × 整套購買</p>
-                    <h2 className="mt-3 text-[2.7rem] font-black leading-[0.92] tracking-tight drop-shadow">
+                    <h2 className="mt-3 text-[2.75rem] font-black leading-[0.92] tracking-tight drop-shadow">
                       Find your<br />Japan fit.
                     </h2>
                     <p className="mt-4 max-w-[260px] text-sm font-bold leading-6 text-white/90">
