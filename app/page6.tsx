@@ -145,7 +145,6 @@ const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/
 const XANO_DECREASE_STOCK_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/decrease-stock";
 const XANO_LOOKBOOKS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
 const XANO_UPDATE_ORDER_SHIPPING_STATUS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-order-shipping-status";
-const XANO_UPDATE_TRACKING_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-tracking";
 const XANO_ADMIN_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-orders";
 const XANO_ADMIN_CREATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-create-product";
 const XANO_ADMIN_UPDATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-update-product";
@@ -182,7 +181,6 @@ export default function JGoAppPrototype() {
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderFilter, setOrderFilter] = useState("all");
-  const [trackingForms, setTrackingForms] = useState({});
   const [authMode, setAuthMode] = useState("login");
   const [currentUser, setCurrentUser] = useState(null);
   const [authForm, setAuthForm] = useState({ name: "", email: "", phone: "", password: "" });
@@ -1048,7 +1046,6 @@ export default function JGoAppPrototype() {
             status: order.payment_status || "Pending",
             shippingStatus: order.shipping_status || (order.payment_status === "Paid" ? "待出貨" : "未付款"),
             trackingNo: order.tracking_no || "",
-            shippingCompany: order.shipping_company || "",
             createdAt: order.created_at ? new Date(Number(order.created_at)).toLocaleString("zh-TW") : ""
           };
         })
@@ -1116,7 +1113,6 @@ export default function JGoAppPrototype() {
             status: order.payment_status || "Pending",
             shippingStatus: order.shipping_status || "待出貨",
             trackingNo: order.tracking_no || "",
-            shippingCompany: order.shipping_company || "",
             customerName: order.customer_name || "",
             customerEmail: order.customer_email || "",
             createdAt: order.created_at
@@ -1159,76 +1155,6 @@ export default function JGoAppPrototype() {
     } catch (error) {
       console.error(error);
       alert(error.message || "更新出貨狀態失敗");
-    }
-  };
-
-
-  const updateTrackingForm = (orderId, field, value) => {
-    setTrackingForms((prev) => ({
-      ...prev,
-      [orderId]: {
-        ...(prev[orderId] || {}),
-        [field]: value,
-      },
-    }));
-  };
-
-  const updateOrderTracking = async (order) => {
-    if (!isAdmin) return;
-
-    const form = trackingForms[order.id] || {};
-    const trackingNo = (form.trackingNo ?? order.trackingNo ?? "").trim();
-    const shippingCompany = (form.shippingCompany ?? order.shippingCompany ?? "").trim();
-
-    if (!trackingNo) {
-      alert("請輸入物流單號");
-      return;
-    }
-
-    if (!shippingCompany) {
-      alert("請輸入物流公司，例如 7-11、全家、黑貓");
-      return;
-    }
-
-    try {
-      const response = await fetch(XANO_UPDATE_TRACKING_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          order_id: order.id,
-          tracking_no: trackingNo,
-          shipping_company: shippingCompany,
-        }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`更新物流失敗：${response.status}，${text}`);
-      }
-
-      setOrders((prev) => prev.map((item) => item.id === order.id ? {
-        ...item,
-        trackingNo,
-        shippingCompany,
-        shippingStatus: "已出貨",
-      } : item));
-
-      setSelectedOrder((prev) => prev?.id === order.id ? {
-        ...prev,
-        trackingNo,
-        shippingCompany,
-        shippingStatus: "已出貨",
-      } : prev);
-
-      setTrackingForms((prev) => ({
-        ...prev,
-        [order.id]: { trackingNo, shippingCompany },
-      }));
-
-      alert("物流資訊已更新");
-    } catch (error) {
-      console.error(error);
-      alert(error.message || "更新物流失敗");
     }
   };
 
@@ -1407,7 +1333,6 @@ export default function JGoAppPrototype() {
         status: data.payment_status || "Pending",
         shippingStatus: "待出貨",
         trackingNo: "",
-        shippingCompany: "",
         createdAt: new Date().toLocaleString("zh-TW"),
       };
 
@@ -2542,35 +2467,6 @@ export default function JGoAppPrototype() {
                             </div>
                           </div>
 
-                          <div className="mt-4 rounded-2xl bg-neutral-50 p-3">
-                            <p className="mb-3 text-sm font-black">物流資訊</p>
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                value={trackingForms[order.id]?.shippingCompany ?? order.shippingCompany ?? ""}
-                                onChange={(e) => updateTrackingForm(order.id, "shippingCompany", e.target.value)}
-                                placeholder="物流公司，例如 7-11"
-                                className="h-11 rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
-                              />
-                              <input
-                                value={trackingForms[order.id]?.trackingNo ?? order.trackingNo ?? ""}
-                                onChange={(e) => updateTrackingForm(order.id, "trackingNo", e.target.value)}
-                                placeholder="物流單號"
-                                className="h-11 rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
-                              />
-                            </div>
-                            {(order.shippingCompany || order.trackingNo) && (
-                              <p className="mt-2 text-xs font-bold text-neutral-500">
-                                目前：{order.shippingCompany || "未填物流公司"} {order.trackingNo || "未填單號"}
-                              </p>
-                            )}
-                            <Button
-                              onClick={() => updateOrderTracking(order)}
-                              className="mt-3 h-11 w-full rounded-2xl bg-neutral-900 text-sm"
-                            >
-                              更新物流並設為已出貨
-                            </Button>
-                          </div>
-
                           <div className="mt-4 grid grid-cols-2 gap-2">
                             <Button
                               onClick={() => updateOrderShippingStatus(order.id, "待出貨")}
@@ -2862,7 +2758,6 @@ export default function JGoAppPrototype() {
                   <div className="rounded-3xl bg-neutral-50 p-4">
                     <h3 className="mb-3 font-black">出貨狀態</h3>
                     <p className="text-sm font-bold text-neutral-700">{selectedOrder.shippingStatus}</p>
-                    {selectedOrder.shippingCompany && <p className="mt-1 text-sm text-neutral-500">物流公司：{selectedOrder.shippingCompany}</p>}
                     {selectedOrder.trackingNo && <p className="mt-1 text-sm text-neutral-500">追蹤碼：{selectedOrder.trackingNo}</p>}
                     </div>
 
