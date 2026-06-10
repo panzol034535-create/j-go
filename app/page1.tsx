@@ -1365,25 +1365,37 @@ export default function JGoAppPrototype() {
   };
 
 
-  const normalizeText = (value) => String(value || "").trim().toLowerCase();
+  const normalizeGender = (value) => String(value || "").trim().toLowerCase();
 
-  const findHomeImage = (targetTag) => {
-    const normalizedTarget = normalizeText(targetTag);
-    return lookbooks.find((lookbook) => {
-      const tag = normalizeText(lookbook.tag);
-      const title = normalizeText(lookbook.title);
-      return tag === normalizedTarget || title === normalizedTarget;
-    })?.image || "";
-  };
+  const maleLookbook =
+    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "male") ||
+    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "men");
 
-  // 首頁圖片改成固定 tag 控制，不再從 products[0] / products[1] 抓圖。
-  // 請在 Xano Lookbooks 建立專用資料，tag 分別填：
-  // home_hero、home_male、home_female、home_unisex。
-  // 這樣新增商品、重算價格、商品排序改變時，首頁圖片都不會亂跳。
-  const heroImage = findHomeImage("home_hero");
-  const categoryMenImage = findHomeImage("home_male");
-  const categoryWomenImage = findHomeImage("home_female");
-  const categoryUnisexImage = findHomeImage("home_unisex");
+  const femaleLookbook =
+    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "female") ||
+    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "women");
+
+  const unisexLookbook =
+    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "unisex");
+
+  const maleProductImage = products.find((product) => normalizeGender(product.gender) === "male")?.image || products[0]?.image;
+  const femaleProductImage = products.find((product) => normalizeGender(product.gender) === "female")?.image || products[1]?.image || products[0]?.image;
+  const unisexProductImage = products.find((product) => normalizeGender(product.gender) === "unisex")?.image || products[2]?.image || products[0]?.image;
+
+  const categoryMenImage = maleLookbook?.image || maleProductImage;
+  const categoryWomenImage = femaleLookbook?.image || femaleProductImage;
+  const categoryUnisexImage = unisexLookbook?.image || unisexProductImage;
+
+  // 首頁 Hero 改成單張固定主圖，避免左右兩張直式圖重疊或資料刷新時跳動。
+  // 優先抓 Lookbook 圖，不用商品清單順序當 Hero，避免新增/重算商品後主圖一直換。
+  const heroImage =
+    maleLookbook?.image ||
+    femaleLookbook?.image ||
+    unisexLookbook?.image ||
+    lookbooks[0]?.image ||
+    maleProductImage ||
+    femaleProductImage ||
+    unisexProductImage;
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
