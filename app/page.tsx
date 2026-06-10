@@ -2384,13 +2384,13 @@ export default function JGoAppPrototype() {
                       <p className="mt-1 text-sm leading-6 text-neutral-500">登入後可以加入購物車、查看訂單與物流資訊。</p>
                     </div>
 
-                    <SignInButton mode="modal">
+                    <SignInButton mode="redirect">
                       <button className="h-12 w-full rounded-2xl bg-neutral-900 text-base font-black text-white">
                         登入會員
                       </button>
                     </SignInButton>
 
-                    <SignUpButton mode="modal">
+                    <SignUpButton mode="redirect">
                       <button className="h-12 w-full rounded-2xl border border-neutral-200 bg-white text-base font-black text-neutral-900">
                         建立新帳號
                       </button>
