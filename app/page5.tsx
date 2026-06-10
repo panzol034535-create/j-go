@@ -1449,24 +1449,14 @@ export default function JGoAppPrototype() {
               </section>
 
               <section className="relative overflow-hidden rounded-[2rem] bg-neutral-900 shadow-2xl">
-                <div className="absolute inset-0 grid grid-cols-2">
-                  {categoryMenImage && (
-                    <img
-                      src={categoryMenImage}
-                      alt="male"
-                      className="h-full w-full object-cover object-top"
-                    />
-                  )}
-
-                  {categoryWomenImage && (
-                    <img
-                      src={categoryWomenImage}
-                      alt="female"
-                      className="h-full w-full object-cover object-top"
-                    />
-                  )}
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/40 to-black/30" />
+                {heroImage && (
+                  <img
+                    src={heroImage}
+                    alt="J-GO lookbook hero"
+                    className="absolute inset-0 h-full w-full object-cover object-top"
+                  />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/10" />
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.18),transparent_30%)]" />
 
                 <div className="relative z-10 min-h-[320px] px-6 py-5 text-white">
