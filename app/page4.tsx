@@ -1367,22 +1367,23 @@ export default function JGoAppPrototype() {
 
   const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
-  const findLookbookByGender = (targetGender) => {
-    const normalizedTarget = normalizeText(targetGender);
-    return lookbooks.find((lookbook) => normalizeText(lookbook.gender) === normalizedTarget);
+  const findHomeImage = (targetTag) => {
+    const normalizedTarget = normalizeText(targetTag);
+    return lookbooks.find((lookbook) => {
+      const tag = normalizeText(lookbook.tag);
+      const title = normalizeText(lookbook.title);
+      return tag === normalizedTarget || title === normalizedTarget;
+    })?.image || "";
   };
 
-  // 首頁圖片改成依照 Lookbook 的 gender 固定抓圖。
-  // 你的 Xano Lookbook 目前只有 gender 欄位，所以不用建立 home_hero / home_male 這些 tag。
-  // male / female / unisex 會各抓第一張對應性別的 Lookbook 圖；不再用 products[0] / products[1]，避免新增商品後跳圖。
-  const maleLookbook = findLookbookByGender("male");
-  const femaleLookbook = findLookbookByGender("female");
-  const unisexLookbook = findLookbookByGender("unisex");
-
-  const categoryMenImage = maleLookbook?.image || "";
-  const categoryWomenImage = femaleLookbook?.image || "";
-  const categoryUnisexImage = unisexLookbook?.image || "";
-  const heroImage = maleLookbook?.image || femaleLookbook?.image || unisexLookbook?.image || lookbooks[0]?.image || "";
+  // 首頁圖片改成固定 tag 控制，不再從 products[0] / products[1] 抓圖。
+  // 請在 Xano Lookbooks 建立專用資料，tag 分別填：
+  // home_hero、home_male、home_female、home_unisex。
+  // 這樣新增商品、重算價格、商品排序改變時，首頁圖片都不會亂跳。
+  const heroImage = findHomeImage("home_hero");
+  const categoryMenImage = findHomeImage("home_male");
+  const categoryWomenImage = findHomeImage("home_female");
+  const categoryUnisexImage = findHomeImage("home_unisex");
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
