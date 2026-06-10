@@ -145,6 +145,7 @@ const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/
 const XANO_DECREASE_STOCK_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/decrease-stock";
 const XANO_LOOKBOOKS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
 const XANO_UPDATE_ORDER_SHIPPING_STATUS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-order-shipping-status";
+const XANO_UPDATE_TRACKING_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-tracking";
 const XANO_ADMIN_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-orders";
 const XANO_ADMIN_CREATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-create-product";
 const XANO_ADMIN_UPDATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-update-product";
@@ -181,6 +182,7 @@ export default function JGoAppPrototype() {
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderFilter, setOrderFilter] = useState("all");
+  const [trackingForms, setTrackingForms] = useState({});
   const [authMode, setAuthMode] = useState("login");
   const [currentUser, setCurrentUser] = useState(null);
   const [authForm, setAuthForm] = useState({ name: "", email: "", phone: "", password: "" });
@@ -1046,6 +1048,7 @@ export default function JGoAppPrototype() {
             status: order.payment_status || "Pending",
             shippingStatus: order.shipping_status || (order.payment_status === "Paid" ? "待出貨" : "未付款"),
             trackingNo: order.tracking_no || "",
+            shippingCompany: order.shipping_company || "",
             createdAt: order.created_at ? new Date(Number(order.created_at)).toLocaleString("zh-TW") : ""
           };
         })
@@ -1113,6 +1116,7 @@ export default function JGoAppPrototype() {
             status: order.payment_status || "Pending",
             shippingStatus: order.shipping_status || "待出貨",
             trackingNo: order.tracking_no || "",
+            shippingCompany: order.shipping_company || "",
             customerName: order.customer_name || "",
             customerEmail: order.customer_email || "",
             createdAt: order.created_at
@@ -1155,6 +1159,76 @@ export default function JGoAppPrototype() {
     } catch (error) {
       console.error(error);
       alert(error.message || "更新出貨狀態失敗");
+    }
+  };
+
+
+  const updateTrackingForm = (orderId, field, value) => {
+    setTrackingForms((prev) => ({
+      ...prev,
+      [orderId]: {
+        ...(prev[orderId] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const updateOrderTracking = async (order) => {
+    if (!isAdmin) return;
+
+    const form = trackingForms[order.id] || {};
+    const trackingNo = (form.trackingNo ?? order.trackingNo ?? "").trim();
+    const shippingCompany = (form.shippingCompany ?? order.shippingCompany ?? "").trim();
+
+    if (!trackingNo) {
+      alert("請輸入物流單號");
+      return;
+    }
+
+    if (!shippingCompany) {
+      alert("請輸入物流公司，例如 7-11、全家、黑貓");
+      return;
+    }
+
+    try {
+      const response = await fetch(XANO_UPDATE_TRACKING_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_id: order.id,
+          tracking_no: trackingNo,
+          shipping_company: shippingCompany,
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`更新物流失敗：${response.status}，${text}`);
+      }
+
+      setOrders((prev) => prev.map((item) => item.id === order.id ? {
+        ...item,
+        trackingNo,
+        shippingCompany,
+        shippingStatus: "已出貨",
+      } : item));
+
+      setSelectedOrder((prev) => prev?.id === order.id ? {
+        ...prev,
+        trackingNo,
+        shippingCompany,
+        shippingStatus: "已出貨",
+      } : prev);
+
+      setTrackingForms((prev) => ({
+        ...prev,
+        [order.id]: { trackingNo, shippingCompany },
+      }));
+
+      alert("物流資訊已更新");
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "更新物流失敗");
     }
   };
 
@@ -1333,6 +1407,7 @@ export default function JGoAppPrototype() {
         status: data.payment_status || "Pending",
         shippingStatus: "待出貨",
         trackingNo: "",
+        shippingCompany: "",
         createdAt: new Date().toLocaleString("zh-TW"),
       };
 
@@ -1365,37 +1440,24 @@ export default function JGoAppPrototype() {
   };
 
 
-  const normalizeGender = (value) => String(value || "").trim().toLowerCase();
+  const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
-  const maleLookbook =
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "male") ||
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "men");
+  const findLookbookByGender = (targetGender) => {
+    const normalizedTarget = normalizeText(targetGender);
+    return lookbooks.find((lookbook) => normalizeText(lookbook.gender) === normalizedTarget);
+  };
 
-  const femaleLookbook =
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "female") ||
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "women");
+  // 首頁圖片改成依照 Lookbook 的 gender 固定抓圖。
+  // 你的 Xano Lookbook 目前只有 gender 欄位，所以不用建立 home_hero / home_male 這些 tag。
+  // male / female / unisex 會各抓第一張對應性別的 Lookbook 圖；不再用 products[0] / products[1]，避免新增商品後跳圖。
+  const maleLookbook = findLookbookByGender("male");
+  const femaleLookbook = findLookbookByGender("female");
+  const unisexLookbook = findLookbookByGender("unisex");
 
-  const unisexLookbook =
-    lookbooks.find((lookbook) => normalizeGender(lookbook.gender) === "unisex");
-
-  const maleProductImage = products.find((product) => normalizeGender(product.gender) === "male")?.image || products[0]?.image;
-  const femaleProductImage = products.find((product) => normalizeGender(product.gender) === "female")?.image || products[1]?.image || products[0]?.image;
-  const unisexProductImage = products.find((product) => normalizeGender(product.gender) === "unisex")?.image || products[2]?.image || products[0]?.image;
-
-  const categoryMenImage = maleLookbook?.image || maleProductImage;
-  const categoryWomenImage = femaleLookbook?.image || femaleProductImage;
-  const categoryUnisexImage = unisexLookbook?.image || unisexProductImage;
-
-  // 首頁 Hero 改成單張固定主圖，避免左右兩張直式圖重疊或資料刷新時跳動。
-  // 優先抓 Lookbook 圖，不用商品清單順序當 Hero，避免新增/重算商品後主圖一直換。
-  const heroImage =
-    maleLookbook?.image ||
-    femaleLookbook?.image ||
-    unisexLookbook?.image ||
-    lookbooks[0]?.image ||
-    maleProductImage ||
-    femaleProductImage ||
-    unisexProductImage;
+  const categoryMenImage = maleLookbook?.image || "";
+  const categoryWomenImage = femaleLookbook?.image || "";
+  const categoryUnisexImage = unisexLookbook?.image || "";
+  const heroImage = maleLookbook?.image || femaleLookbook?.image || unisexLookbook?.image || lookbooks[0]?.image || "";
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
@@ -1462,14 +1524,24 @@ export default function JGoAppPrototype() {
               </section>
 
               <section className="relative overflow-hidden rounded-[2rem] bg-neutral-900 shadow-2xl">
-                {heroImage && (
-                  <img
-                    src={heroImage}
-                    alt="J-GO lookbook hero"
-                    className="absolute inset-0 h-full w-full object-cover object-top"
-                  />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/10" />
+                <div className="absolute inset-0 grid grid-cols-2">
+                  {categoryMenImage && (
+                    <img
+                      src={categoryMenImage}
+                      alt="male"
+                      className="h-full w-full object-cover object-top"
+                    />
+                  )}
+
+                  {categoryWomenImage && (
+                    <img
+                      src={categoryWomenImage}
+                      alt="female"
+                      className="h-full w-full object-cover object-top"
+                    />
+                  )}
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/40 to-black/30" />
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.18),transparent_30%)]" />
 
                 <div className="relative z-10 min-h-[320px] px-6 py-5 text-white">
@@ -2470,6 +2542,35 @@ export default function JGoAppPrototype() {
                             </div>
                           </div>
 
+                          <div className="mt-4 rounded-2xl bg-neutral-50 p-3">
+                            <p className="mb-3 text-sm font-black">物流資訊</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                value={trackingForms[order.id]?.shippingCompany ?? order.shippingCompany ?? ""}
+                                onChange={(e) => updateTrackingForm(order.id, "shippingCompany", e.target.value)}
+                                placeholder="物流公司，例如 7-11"
+                                className="h-11 rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
+                              />
+                              <input
+                                value={trackingForms[order.id]?.trackingNo ?? order.trackingNo ?? ""}
+                                onChange={(e) => updateTrackingForm(order.id, "trackingNo", e.target.value)}
+                                placeholder="物流單號"
+                                className="h-11 rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
+                              />
+                            </div>
+                            {(order.shippingCompany || order.trackingNo) && (
+                              <p className="mt-2 text-xs font-bold text-neutral-500">
+                                目前：{order.shippingCompany || "未填物流公司"} {order.trackingNo || "未填單號"}
+                              </p>
+                            )}
+                            <Button
+                              onClick={() => updateOrderTracking(order)}
+                              className="mt-3 h-11 w-full rounded-2xl bg-neutral-900 text-sm"
+                            >
+                              更新物流並設為已出貨
+                            </Button>
+                          </div>
+
                           <div className="mt-4 grid grid-cols-2 gap-2">
                             <Button
                               onClick={() => updateOrderShippingStatus(order.id, "待出貨")}
@@ -2761,6 +2862,7 @@ export default function JGoAppPrototype() {
                   <div className="rounded-3xl bg-neutral-50 p-4">
                     <h3 className="mb-3 font-black">出貨狀態</h3>
                     <p className="text-sm font-bold text-neutral-700">{selectedOrder.shippingStatus}</p>
+                    {selectedOrder.shippingCompany && <p className="mt-1 text-sm text-neutral-500">物流公司：{selectedOrder.shippingCompany}</p>}
                     {selectedOrder.trackingNo && <p className="mt-1 text-sm text-neutral-500">追蹤碼：{selectedOrder.trackingNo}</p>}
                     </div>
 

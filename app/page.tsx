@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useMemo, useState, useEffect } from "react";
+import { SignInButton, SignUpButton, UserButton, SignedIn, SignedOut, useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles } from "lucide-react";
 
@@ -153,6 +154,7 @@ const XANO_ADMIN_DELETE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi
 const XANO_RECALCULATE_PRODUCTS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-recalculate-all-products";
 
 export default function JGoAppPrototype() {
+  const { user, isSignedIn } = useUser();
   const [tab, setTab] = useState("home");
   const [products, setProducts] = useState([]);
   const [lookbooks, setLookbooks] = useState([]);
@@ -239,21 +241,34 @@ export default function JGoAppPrototype() {
     size_chart: "",
   });
   const [editingProductId, setEditingProductId] = useState(null);
-  const isAdmin = currentUser?.email === "panzol034535@gmail.com";
+  const isAdmin = user?.primaryEmailAddress?.emailAddress === "panzol034535@gmail.com";
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
 
   const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("jgo_current_user");
-    if (savedUser) {
-      const user = JSON.parse(savedUser);
-      setCurrentUser(user);
-      setAccountForm({ name: user.name, email: user.email, phone: user.phone });
-      setCheckoutForm({ name: user.name, email: user.email, phone: user.phone });
+    if (!isSignedIn || !user) {
+      setCurrentUser(null);
+      localStorage.removeItem("jgo_current_user");
+      setAccountForm({ name: "", email: "", phone: "" });
+      setCheckoutForm({ name: "", email: "", phone: "" });
+      return;
     }
-  }, []);
+
+    const clerkUser = {
+      id: user.id,
+      name: user.fullName || user.firstName || "J-GO 會員",
+      email: user.primaryEmailAddress?.emailAddress || "",
+      phone: user.primaryPhoneNumber?.phoneNumber || "",
+      provider: "Clerk",
+    };
+
+    setCurrentUser(clerkUser);
+    localStorage.setItem("jgo_current_user", JSON.stringify(clerkUser));
+    setAccountForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
+    setCheckoutForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
+  }, [isSignedIn, user?.id]);
 
   useEffect(() => {
     localStorage.setItem("jgo_cart", JSON.stringify(cart));
@@ -734,7 +749,7 @@ export default function JGoAppPrototype() {
   };
 
   const addToCart = () => {
-    if (!currentUser) return requireLogin();
+    if (!isSignedIn || !currentUser) return requireLogin();
 
     if (!selectedSize || selectedSizeStock <= 0) {
       alert("這個顏色 / 尺寸目前缺貨");
@@ -809,7 +824,7 @@ export default function JGoAppPrototype() {
   };
 
   const addOutfitSelectionsToCart = () => {
-    if (!currentUser) return requireLogin();
+    if (!isSignedIn || !currentUser) return requireLogin();
 
     const relatedProducts = getLookbookProducts(selectedLookbook);
 
@@ -1234,7 +1249,7 @@ export default function JGoAppPrototype() {
 
   const submitOrder = async () => {
     if (isSubmitting) return;
-    if (!currentUser) return requireLogin();
+    if (!isSignedIn || !currentUser) return requireLogin();
     if (cart.length === 0) return;
 
     if (!checkoutForm.name || !checkoutForm.email || !checkoutForm.phone) {
@@ -1469,9 +1484,18 @@ export default function JGoAppPrototype() {
               <h1 className="text-2xl font-black tracking-tight">J-GO</h1>
             </div>
             <div className="flex items-center gap-2">
-            <button onClick={() => setTab("account")} className="rounded-full border border-neutral-200 p-3 text-neutral-700">
-              <User size={20} />
-            </button>
+            <SignedOut>
+              <SignInButton mode="modal">
+                <button className="rounded-full border border-neutral-200 p-3 text-neutral-700">
+                  <User size={20} />
+                </button>
+              </SignInButton>
+            </SignedOut>
+            <SignedIn>
+              <div className="flex h-11 w-11 items-center justify-center rounded-full border border-neutral-200 bg-white">
+                <UserButton afterSignOutUrl="/" />
+              </div>
+            </SignedIn>
             <button onClick={() => setTab("cart")} className="relative rounded-full bg-neutral-900 p-3 text-white">
               <ShoppingBag size={20} />
               {cart.length > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-xs">{cart.length}</span>}
@@ -2198,7 +2222,7 @@ export default function JGoAppPrototype() {
                   ))}
                   <PriceBox subtotal={subtotal} shipping={shipping} total={total} />
                   <Button onClick={() => {
-                    if (!currentUser) return requireLogin();
+                    if (!isSignedIn || !currentUser) return requireLogin();
                     setTab("checkout");
                   }} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">前往結帳</Button>
                 </>
@@ -2323,7 +2347,7 @@ export default function JGoAppPrototype() {
                   <CardContent className="space-y-4 p-5">
                     <div className="flex items-center gap-3">
                       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-900 text-xl font-black text-white">
-                        {currentUser.name.slice(0, 1)}
+                        {(currentUser.name || "J").slice(0, 1)}
                       </div>
                       <div>
                         <h3 className="text-lg font-black">{currentUser.name}</h3>
@@ -2349,39 +2373,34 @@ export default function JGoAppPrototype() {
                       </Button>
                     )}
 
-                    <Button onClick={logout} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
-                      <LogOut size={18} className="mr-2" /> 登出
-                    </Button>
+                    <div className="flex items-center justify-between rounded-2xl bg-neutral-50 px-4 py-3">
+                      <span className="text-sm font-black text-neutral-600">帳號設定 / 登出</span>
+                      <UserButton afterSignOutUrl="/" />
+                    </div>
                   </CardContent>
                 </Card>
               ) : (
                 <Card className="rounded-3xl border-neutral-100 shadow-sm">
-                  <CardContent className="space-y-4 p-5">
-                    <div className="grid grid-cols-2 gap-2 rounded-2xl bg-neutral-100 p-1">
-                      <button onClick={() => setAuthMode("login")} className={`rounded-xl py-2 text-sm font-bold ${authMode === "login" ? "bg-white shadow-sm" : "text-neutral-500"}`}>登入</button>
-                      <button onClick={() => setAuthMode("register")} className={`rounded-xl py-2 text-sm font-bold ${authMode === "register" ? "bg-white shadow-sm" : "text-neutral-500"}`}>註冊</button>
+                  <CardContent className="space-y-4 p-5 text-center">
+                    <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
+                      <User size={28} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black">登入 J-GO 會員</h3>
+                      <p className="mt-1 text-sm leading-6 text-neutral-500">登入後可以加入購物車、查看訂單與物流資訊。</p>
                     </div>
 
-                    {authMode === "register" && (
-                      <Input label="姓名" placeholder="你的名字" value={authForm.name} onChange={(value) => setAuthForm({ ...authForm, name: value })} />
-                    )}
-                    <Input label="Email" placeholder="hello@example.com" value={authForm.email} onChange={(value) => setAuthForm({ ...authForm, email: value })} icon={<Mail size={18} />} />
-                    <Input label="手機號碼" placeholder="0912345678" value={authForm.phone} onChange={(value) => setAuthForm({ ...authForm, phone: value })} />
-                    <Input label="密碼" placeholder="至少 8 碼" type="password" value={authForm.password} onChange={(value) => setAuthForm({ ...authForm, password: value })} icon={<Lock size={18} />} />
+                    <SignInButton mode="modal">
+                      <button className="h-12 w-full rounded-2xl bg-neutral-900 text-base font-black text-white">
+                        登入會員
+                      </button>
+                    </SignInButton>
 
-                    <Button onClick={submitAuth} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
-                      {authMode === "login" ? "登入" : "建立帳號"}
-                    </Button>
-
-                    <div className="flex items-center gap-3 text-xs text-neutral-400">
-                      <div className="h-px flex-1 bg-neutral-200" />
-                      或
-                      <div className="h-px flex-1 bg-neutral-200" />
-                    </div>
-
-                    <button onClick={loginWithGoogle} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-neutral-200 bg-white font-bold text-neutral-900">
-                      <span className="text-lg">G</span> 使用 Google 登入
-                    </button>
+                    <SignUpButton mode="modal">
+                      <button className="h-12 w-full rounded-2xl border border-neutral-200 bg-white text-base font-black text-neutral-900">
+                        建立新帳號
+                      </button>
+                    </SignUpButton>
                   </CardContent>
                 </Card>
               )}
