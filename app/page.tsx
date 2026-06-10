@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useMemo, useState, useEffect } from "react";
-import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
+import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles } from "lucide-react";
 
@@ -1484,17 +1484,12 @@ export default function JGoAppPrototype() {
               <h1 className="text-2xl font-black tracking-tight">J-GO</h1>
             </div>
             <div className="flex items-center gap-2">
-            {isSignedIn ? (
-              <div className="flex h-11 w-11 items-center justify-center rounded-full border border-neutral-200 bg-white">
-                <UserButton afterSignOutUrl="/" />
-              </div>
-            ) : (
-              <SignInButton mode="modal">
-                <button className="rounded-full border border-neutral-200 p-3 text-neutral-700">
-                  <User size={20} />
-                </button>
-              </SignInButton>
-            )}
+            <button
+              onClick={() => setTab("account")}
+              className="rounded-full border border-neutral-200 p-3 text-neutral-700"
+            >
+              <User size={20} />
+            </button>
             <button onClick={() => setTab("cart")} className="relative rounded-full bg-neutral-900 p-3 text-white">
               <ShoppingBag size={20} />
               {cart.length > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-xs">{cart.length}</span>}
