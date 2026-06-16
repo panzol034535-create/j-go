@@ -64,6 +64,12 @@ export function AdminShell({ title, children }: AdminShellProps) {
             >
               Draft 管理
             </Link>
+            <Link
+              href="/admin/stock-monitor"
+              className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-bold text-neutral-700"
+            >
+              庫存監控
+            </Link>
           </nav>
         </header>
         <main className="flex-1 px-5 py-6">{children}</main>

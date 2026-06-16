@@ -1,10 +1,72 @@
 // @ts-nocheck
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
-import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles } from "lucide-react";
+import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles, ChevronDown, Heart, ShieldCheck, Clock } from "lucide-react";
+import {
+  findFirstSelectableSize,
+  getProductColorOptions,
+  getProductDescription,
+  getProductSizeNames,
+  getSizeOptionsForColor,
+  getSizeStockQty,
+  getVariantForColorAndSize,
+  isSizeOutOfStock,
+  isSizeSelectable,
+  parseCommaList,
+  parseProductVariants,
+} from "@/lib/products/product-fields";
+import { openStockSync } from "@/lib/admin/stock-sync";
+import { detectSourceSite } from "@/lib/products/source-site";
+import {
+  getSizeTableColumns,
+  parseSizeTableJson,
+  SIZE_TABLE_FIELD_LABELS,
+} from "@/lib/products/size-table-json";
+import {
+  formatModelSizeDisplay,
+  getProductModelSizeFields,
+} from "@/lib/products/zozo-model-size";
+import { SizeTableEditor } from "@/components/admin/SizeTableEditor";
+import { buildSizeRecommendation, normalizeSizeName } from "@/lib/products/size-recommendation";
+import { filterProductsBySearch } from "@/lib/products/product-search";
+import { isFavoriteProduct, loadFavoriteIds, saveFavoriteIds, toggleFavoriteId } from "@/lib/favorites";
+import { formatShippedAt, toDatetimeLocalValue, toIsoDateTime } from "@/lib/orders/shipping";
+import {
+  formatPaymentStatus,
+  formatShippingStatus,
+  formatTrackingNo,
+  getPaymentStatusClass,
+  getShippingStatusClass,
+} from "@/lib/orders/order-status";
+import { runPrelaunchChecks, summarizePrelaunchChecks } from "@/lib/prelaunch-check";
+import {
+  sortByFavoriteCount,
+  syncLookbookFavoriteCount,
+  syncProductFavoriteCount,
+} from "@/lib/rankings/favorite-ranking";
+import { HOME_TRUST_CARDS, PRODUCT_TRUST_BADGES } from "@/lib/trust-signals";
+import {
+  readLatestPurchaseFromStorage,
+  trackAddToCart,
+  trackBeginCheckout,
+  trackBrandClick,
+  trackFavoriteLookbook,
+  trackFavoriteProduct,
+  trackHomeView,
+  trackProductView,
+  trackPurchaseSuccess,
+  trackSearchProducts,
+} from "@/lib/analytics";
+import {
+  isFavoriteLookbook,
+  loadFavoriteLookbookIds,
+  resolveLookbookId,
+  saveFavoriteLookbookIds,
+  toggleFavoriteLookbookId,
+} from "@/lib/lookbook-favorites";
 
 function Button({ children, onClick, className = "" }) {
   const hasColorOverride = className.includes("text-neutral") || className.includes("text-black") || className.includes("text-white");
@@ -35,40 +97,98 @@ function formatPrice(n) {
   return `NT$ ${value.toLocaleString("zh-TW")}`;
 }
 
-function formatModelInfo(product) {
-  if (!product) return "";
-
-  const height = product.modelHeight;
-  const weight = product.modelWeight;
-  const size = product.modelSize;
-
-  if (!height && !weight && !size) return "";
-
-  const body = [
-    height ? `${height}cm` : "",
-    weight ? `${weight}kg` : "",
-  ].filter(Boolean).join(" / ");
-
-  if (body && size) return `${body} 著用 ${size} size`;
-  if (body) return body;
-  return `著用 ${size} size`;
+function formatProductGender(gender) {
+  if (gender === "male") return "男生";
+  if (gender === "female") return "女生";
+  return "中性";
 }
 
+function getStockDisplayLabel(status, stock) {
+  if (status === "out_of_stock" || (typeof stock === "number" && stock <= 0)) {
+    return "已售完";
+  }
+
+  if (status === "in_stock" && typeof stock === "number" && stock > 0 && stock <= 3) {
+    return "剩少量";
+  }
+
+  if (status === "in_stock") {
+    return "有現貨";
+  }
+
+  return "";
+}
+
+function getColorStockMaps(product) {
+  const statusMap = {};
+  const stockMap = {};
+
+  for (const color of getProductColorOptions(product)) {
+    const sizes = getSizeOptionsForColor(product, color);
+    const availableSizes = sizes.filter((size) => !isSizeOutOfStock(size) && getSizeStockQty(size) > 0);
+
+    if (availableSizes.length === 0) {
+      statusMap[color] = "out_of_stock";
+      stockMap[color] = 0;
+      continue;
+    }
+
+    const lowestStock = Math.min(...availableSizes.map((size) => getSizeStockQty(size)));
+    statusMap[color] = "in_stock";
+    stockMap[color] = lowestStock;
+  }
+
+  return { statusMap, stockMap };
+}
+
+function buildProductFeatureText(product, description) {
+  return [
+    description,
+    product?.material ? `材質：${product.material}` : "",
+    product?.fit ? `版型：${product.fit}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function buildProductSizeInfoText(product) {
+  const model = getProductModelSizeFields(product);
+  const modelText = formatModelSizeDisplay({
+    model_height_cm: model.height || null,
+    model_weight_kg: model.weight || null,
+    model_wear_size: model.wearSize,
+  });
+
+  return [
+    modelText,
+    product?.recommendedHeight ? `建議身高：${product.recommendedHeight}` : "",
+    product?.recommendedWeight ? `建議體重：${product.recommendedWeight}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function buildBrandIntroText(product) {
+  const brand = product?.brand?.trim();
+  if (!brand) return "";
+
+  return [
+    `${brand} 為 J-GO 精選日本品牌。`,
+    product?.tag ? `系列標籤：${product.tag}` : "",
+    "點擊品牌名稱可查看更多同品牌商品。",
+  ].filter(Boolean).join("\n");
+}
 
 const SIZE_ORDER = ["XS", "S", "M", "L", "XL", "XXL", "FREE"];
 
-function normalizeSizeName(size) {
-  return String(size || "").trim().toUpperCase();
-}
-
 function getAvailableSizeNames(product) {
-  const fromVariants = (product?.variants || [])
+  if (!product) {
+    return [];
+  }
+
+  const fromVariants = (product.variants || [])
     .flatMap((variant) => variant.sizes || [])
     .filter((size) => Number(size.stock ?? 999) > 0)
     .map((size) => normalizeSizeName(size.name))
     .filter(Boolean);
 
-  const fromSizes = (product?.sizes || []).map(normalizeSizeName).filter(Boolean);
+  const fromSizes = getProductSizeNames(product).map(normalizeSizeName).filter(Boolean);
   const unique = Array.from(new Set([...fromVariants, ...fromSizes]));
 
   return unique.sort((a, b) => {
@@ -81,72 +201,15 @@ function getAvailableSizeNames(product) {
   });
 }
 
-function moveSize(size, diff, availableSizes = []) {
-  const normalized = normalizeSizeName(size);
-  const candidates = availableSizes.length ? availableSizes : SIZE_ORDER;
-  const index = candidates.indexOf(normalized);
-
-  if (index === -1) return normalized || candidates[0] || "";
-  return candidates[Math.max(0, Math.min(candidates.length - 1, index + diff))];
-}
-
-function buildFitRecommendation(product, sizeAI) {
-  const userHeight = Number(sizeAI.height);
-  const userWeight = Number(sizeAI.weight);
-  const modelHeight = Number(product?.modelHeight);
-  const modelWeight = Number(product?.modelWeight);
-  const modelSize = normalizeSizeName(product?.modelSize);
-  const availableSizes = getAvailableSizeNames(product).filter((size) => size !== "FREE");
-
-  if (!userHeight || !userWeight) {
-    return { size: "", reason: "請輸入身高與體重，系統會依 Model 參考推薦尺寸。", details: [] };
-  }
-
-  if (!modelSize || !modelHeight || !modelWeight) {
-    return { size: "", reason: "此商品尚未設定 Model 身高、體重或著用尺寸。", details: [] };
-  }
-
-  if (modelSize === "FREE") {
-    return {
-      size: "FREE",
-      reason: "此商品為 FREE SIZE，建議參考商品尺寸表與版型。",
-      details: [`Model ${modelHeight}cm / ${modelWeight}kg 著用 FREE size`],
-    };
-  }
-
-  const heightDiff = userHeight - modelHeight;
-  const weightDiff = userWeight - modelWeight;
-  let step = 0;
-
-  if (weightDiff >= 10 || heightDiff >= 8) step = 1;
-  else if (weightDiff <= -10 && heightDiff <= -5) step = -1;
-  else if (weightDiff >= 6 && heightDiff >= 4) step = 1;
-  else if (weightDiff <= -8) step = -1;
-
-  const size = moveSize(modelSize, step, availableSizes);
-  const direction = step > 0 ? "大一號" : step < 0 ? "小一號" : "同尺寸";
-
-  return {
-    size,
-    reason: `你比 Model ${heightDiff >= 0 ? "高" : "矮"}${Math.abs(heightDiff)}cm、${weightDiff >= 0 ? "重" : "輕"}${Math.abs(weightDiff)}kg，建議先選 ${direction}。`,
-    details: [
-      `Model ${modelHeight}cm / ${modelWeight}kg 著用 ${modelSize} size`,
-      step === 0 ? "身形差距不大，建議選 Model 著用尺寸。" : "若想穿更寬鬆，可再往上選一碼。",
-    ],
-  };
-}
-
 const XANO_CHECKOUT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/checkout";
 const XANO_ADD_ORDER_ITEM_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/add-order-item";
 const XANO_GET_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/Get_Orders";
 const XANO_GET_ORDER_ITEMS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/order-items";
-const XANO_PRODUCTS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/products";
 const XANO_CREATE_ECPAY_ORDER_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-ecpay-order";
 const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-cvs-map";
 const XANO_DECREASE_STOCK_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/decrease-stock";
 const XANO_LOOKBOOKS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
 const XANO_UPDATE_ORDER_SHIPPING_STATUS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-order-shipping-status";
-const XANO_UPDATE_TRACKING_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-tracking";
 const XANO_ADMIN_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-orders";
 const XANO_ADMIN_CREATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-create-product";
 const XANO_ADMIN_UPDATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-update-product";
@@ -162,21 +225,18 @@ export default function JGoAppPrototype() {
   const [outfitSelections, setOutfitSelections] = useState({});
   const [activeGender, setActiveGender] = useState("all");
   const [activeBrand, setActiveBrand] = useState("all");
+  const [shopSearchQuery, setShopSearchQuery] = useState("");
+  const [favoriteIds, setFavoriteIds] = useState([]);
+  const [favoriteLookbookIds, setFavoriteLookbookIds] = useState([]);
+  const [favoritesTab, setFavoritesTab] = useState("products");
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
-  const [cart, setCart] = useState(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const savedCart = localStorage.getItem("jgo_cart");
-      const parsedCart = savedCart ? JSON.parse(savedCart) : [];
-      return Array.isArray(parsedCart) ? parsedCart : [];
-    } catch {
-      return [];
-    }
-  });
+  const [mounted, setMounted] = useState(false);
+  const [cartCount, setCartCount] = useState(0);
+  const [cart, setCart] = useState([]);
   const [delivery, setDelivery] = useState(() => {
     if (typeof window === "undefined") return "711";
     return localStorage.getItem("jgo_delivery") || "711";
@@ -185,6 +245,10 @@ export default function JGoAppPrototype() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderFilter, setOrderFilter] = useState("all");
   const [trackingForms, setTrackingForms] = useState({});
+  const [prelaunchChecks, setPrelaunchChecks] = useState([]);
+  const [prelaunchLoading, setPrelaunchLoading] = useState(false);
+  const [salesRankings, setSalesRankings] = useState([]);
+  const checkoutTrackedRef = useRef(false);
   const [authMode, setAuthMode] = useState("login");
   const [currentUser, setCurrentUser] = useState(null);
   const [authForm, setAuthForm] = useState({ name: "", email: "", phone: "", password: "" });
@@ -219,6 +283,7 @@ export default function JGoAppPrototype() {
   });
   const [editingLookbookId, setEditingLookbookId] = useState(null);
   const [sizeAI, setSizeAI] = useState({ gender: "male", height: "", weight: "" });
+  const [sizeAIResult, setSizeAIResult] = useState(null);
   const [productForm, setProductForm] = useState({
     name: "",
     brand: "",
@@ -271,8 +336,37 @@ export default function JGoAppPrototype() {
   }, [isSignedIn, user?.id]);
 
   useEffect(() => {
+    try {
+      const savedCart = localStorage.getItem("jgo_cart");
+      const parsedCart = savedCart ? JSON.parse(savedCart) : [];
+      const nextCart = Array.isArray(parsedCart) ? parsedCart : [];
+      setCart(nextCart);
+      setCartCount(nextCart.length);
+    } catch {
+      setCart([]);
+      setCartCount(0);
+    }
+
+    setMounted(true);
+
+    try {
+      setFavoriteIds(loadFavoriteIds());
+    } catch {
+      setFavoriteIds([]);
+    }
+
+    try {
+      setFavoriteLookbookIds(loadFavoriteLookbookIds());
+    } catch {
+      setFavoriteLookbookIds([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    setCartCount(cart.length);
     localStorage.setItem("jgo_cart", JSON.stringify(cart));
-  }, [cart]);
+  }, [cart, mounted]);
 
   useEffect(() => {
     localStorage.setItem("jgo_pickup_store", JSON.stringify(pickupStore));
@@ -288,6 +382,17 @@ export default function JGoAppPrototype() {
 
     if (params.get("payment") === "success") {
       const savedUser = localStorage.getItem("jgo_current_user");
+
+      if (savedUser) {
+        try {
+          const user = JSON.parse(savedUser);
+          trackPurchaseSuccess(readLatestPurchaseFromStorage(user.email));
+        } catch {
+          trackPurchaseSuccess();
+        }
+      } else {
+        trackPurchaseSuccess();
+      }
 
       setPaymentMessage("付款成功，正在更新訂單...");
       setTab("payment-result");
@@ -339,6 +444,18 @@ export default function JGoAppPrototype() {
           ? [product.image]
           : [];
 
+      console.log("PRODUCT VARIANTS", product.variants);
+      const variants = parseProductVariants(product);
+
+      const source_url =
+        product.source_url || product.sourceUrl || product.url || "";
+      const source_site =
+        product.source_site || product.sourceSite || (source_url ? detectSourceSite(source_url) : "unknown");
+      const source_product_id =
+        product.source_product_id ||
+        product.sourceProductId ||
+        (source_url.match(/\/goods(?:-sale)?\/(\d+)/i)?.[1] || "");
+
       return {
         id: product.id,
         name: product.name,
@@ -348,37 +465,31 @@ export default function JGoAppPrototype() {
         compareAt: product.compare_at,
         image: images[0] || product.image,
         images,
-        colors: product.colors ? product.colors.split(",").map((color) => color.trim()).filter(Boolean) : [],
-        sizes: product.sizes ? product.sizes.split(",").map((size) => size.trim()).filter(Boolean) : [],
-        variants: product.variants
-          ? product.variants.split(";").map((variant) => {
-              const [color, ...sizeParts] = variant.split(":");
-              const sizeText = sizeParts.join(":");
-              return {
-                color: color?.trim(),
-                sizes: sizeText
-                  ? sizeText.split(",").map((sizeItem) => {
-                      const [sizeName, stockText] = sizeItem.split(":");
-                      return {
-                        name: sizeName?.trim(),
-                        stock: Number(stockText ?? 999),
-                      };
-                    }).filter((size) => size.name)
-                  : [],
-              };
-            })
-          : [],
+        colors: getProductColorOptions({ variants, colors: product.colors }),
+        sizes: parseCommaList(product.sizes),
+        variants,
+        variantRecords: Array.isArray(product.variants) ? product.variants : [],
         tag: product.tag || "日本選品",
         gender: product.gender || "unisex",
-        description: product.description || "",
+        description: getProductDescription(product),
+        description_zh: product.description_zh || "",
+        description_jp: product.description_jp || "",
         material: product.material || "",
         fit: product.fit || "",
-        modelHeight: product.model_height || "",
-        modelWeight: product.model_weight || "",
-        modelSize: product.model_size || "",
+        modelHeight: product.model_height || product.model_height_cm || "",
+        modelWeight: product.model_weight || product.model_weight_kg || "",
+        modelSize: product.model_size || product.model_wear_size || "",
+        modelHeightCm: product.model_height_cm || product.model_height || "",
+        modelWeightKg: product.model_weight_kg || product.model_weight || "",
+        modelWearSize: product.model_wear_size || product.model_size || "",
         recommendedHeight: product.recommended_height || "",
         recommendedWeight: product.recommended_weight || "",
         sizeChart: product.size_chart || "",
+        sizeTableJson: parseSizeTableJson(product.size_table_json),
+        source_url,
+        source_site,
+        source_product_id,
+        favoriteCount: Number(product.favorite_count) || 0,
       };
     });
   };
@@ -393,12 +504,17 @@ export default function JGoAppPrototype() {
     });
 
     const activeProduct = nextProducts.find((product) => product.id === selectedProduct?.id) || nextProducts[0];
+    if (!activeProduct) {
+      return;
+    }
+
     const activeVariant = activeProduct.variants?.find((variant) => variant.color === selectedColor) || activeProduct.variants?.[0];
-    const nextColor = activeVariant?.color || activeProduct.colors?.[0] || "";
-    const nextSize = activeVariant?.sizes?.find((size) => size.name === selectedSize && size.stock > 0)?.name
-      || activeVariant?.sizes?.find((size) => size.stock > 0)?.name
+    const colorOptions = getProductColorOptions(activeProduct);
+    const sizeOptions = getProductSizeNames(activeProduct);
+    const nextColor = activeVariant?.color || colorOptions[0] || "";
+    const nextSize = findFirstSelectableSize(activeVariant?.sizes || [])?.name
       || activeVariant?.sizes?.[0]?.name
-      || activeProduct.sizes?.[0]
+      || sizeOptions[0]
       || "";
 
     setSelectedColor(nextColor);
@@ -410,7 +526,7 @@ export default function JGoAppPrototype() {
     setLoadingProducts(true);
 
     if (useCache) {
-      const cachedProducts = localStorage.getItem("jgo_products_cache");
+      const cachedProducts = localStorage.getItem("jgo_products_cache_v2");
       if (cachedProducts) {
         const parsedProducts = JSON.parse(cachedProducts);
         if (Array.isArray(parsedProducts) && parsedProducts.length > 0) {
@@ -421,18 +537,18 @@ export default function JGoAppPrototype() {
     }
 
     try {
-      const response = await fetch(`${XANO_PRODUCTS_URL}?t=${Date.now()}`);
+      const response = await fetch(`/api/products?t=${Date.now()}`);
 
       if (!response.ok) {
         throw new Error("商品 API 載入失敗");
       }
 
       const data = await response.json();
-      const productList = Array.isArray(data) ? data : [];
+      const productList = Array.isArray(data.products) ? data.products : Array.isArray(data) ? data : [];
       const formattedProducts = formatXanoProducts(productList);
 
       if (formattedProducts.length > 0) {
-        localStorage.setItem("jgo_products_cache", JSON.stringify(formattedProducts));
+        localStorage.setItem("jgo_products_cache_v2", JSON.stringify(formattedProducts));
         applyProducts(formattedProducts);
       }
     } catch (error) {
@@ -447,6 +563,14 @@ export default function JGoAppPrototype() {
     loadLookbooks();
   }, []);
 
+  useEffect(() => {
+    if (!mounted) {
+      return;
+    }
+
+    loadSalesRankings();
+  }, [mounted]);
+
   const loadLookbooks = async () => {
     try {
       const response = await fetch(`${XANO_LOOKBOOKS_URL}?t=${Date.now()}`);
@@ -455,18 +579,24 @@ export default function JGoAppPrototype() {
       const data = await response.json();
       const list = Array.isArray(data) ? data : data?.items || [];
 
-      setLookbooks(list.map((lookbook) => ({
-        id: lookbook.id,
-        title: lookbook.title || "J-GO Lookbook",
-        image: lookbook.image,
-        tag: lookbook.tag || lookbook.style_tag || "AI LOOKBOOK",
-        gender: lookbook.gender || "unisex",
-        product_ids: String(lookbook.product_ids || "")
-          .split(",")
-          .map((id) => Number(id.trim()))
-          .filter(Boolean),
-        raw_product_ids: lookbook.product_ids || "",
-      })));
+      setLookbooks(list.map((lookbook, index) => {
+        const id = resolveLookbookId(lookbook, index);
+
+        return {
+          id,
+          lookbook_id: lookbook.lookbook_id || lookbook.id || id,
+          title: lookbook.title || "J-GO Lookbook",
+          image: lookbook.image,
+          tag: lookbook.tag || lookbook.style_tag || "AI LOOKBOOK",
+          gender: lookbook.gender || "unisex",
+          product_ids: String(lookbook.product_ids || "")
+            .split(",")
+            .map((value) => Number(value.trim()))
+            .filter(Boolean),
+          raw_product_ids: lookbook.product_ids || "",
+          favoriteCount: Number(lookbook.favorite_count) || 0,
+        };
+      }));
     } catch (error) {
       console.error(error);
     }
@@ -575,6 +705,21 @@ export default function JGoAppPrototype() {
     return (product.variants || [])
       .map((variant) => `${variant.color}:${(variant.sizes || []).map((size) => `${size.name}:${size.stock}`).join(",")}`)
       .join(";");
+  };
+
+  const handleSyncStock = (product) => {
+    const sourceUrl = product.source_url || product.sourceUrl || product.url;
+
+    if (!sourceUrl?.trim()) {
+      console.log("SYNC PRODUCT MISSING SOURCE_URL", product);
+      alert("此商品沒有來源網址，無法同步庫存");
+      return;
+    }
+
+    const opened = openStockSync(sourceUrl, product.id);
+    if (opened) {
+      alert("已開啟 ZOZO 商品頁，請先選擇顏色，再按「同步目前顏色庫存」");
+    }
   };
 
   const startEditProduct = (product) => {
@@ -715,31 +860,249 @@ export default function JGoAppPrototype() {
     }
   };
 
-  const filteredProducts = products.filter((product) => {
-    const genderMatched = activeGender === "all"
-      ? true
-      : activeGender === "unisex"
-        ? product.gender === "unisex"
-        : product.gender === activeGender || product.gender === "unisex";
+  const catalogFilteredProducts = products.filter((product) => {
+    const genderMatched =
+      activeGender === "all" ? true : product.gender === activeGender;
 
     const brandMatched = activeBrand === "all" || product.brand === activeBrand;
 
     return genderMatched && brandMatched;
   });
 
+  const filteredProducts = filterProductsBySearch(catalogFilteredProducts, shopSearchQuery);
+
+  const favoriteProducts = useMemo(
+    () => products.filter((product) => isFavoriteProduct(favoriteIds, product.id)),
+    [products, favoriteIds]
+  );
+
+  const favoriteLookbooks = useMemo(
+    () => lookbooks.filter((lookbook) => isFavoriteLookbook(favoriteLookbookIds, lookbook.id)),
+    [lookbooks, favoriteLookbookIds]
+  );
+
+  const topSalesProducts = useMemo(() => {
+    return salesRankings
+      .map((entry, index) => {
+        const product = products.find((item) => Number(item.id) === Number(entry.product_id));
+        if (!product) {
+          return null;
+        }
+
+        return {
+          ...product,
+          rank: index + 1,
+          soldCount: Number(entry.total_qty) || 0,
+        };
+      })
+      .filter(Boolean);
+  }, [salesRankings, products]);
+
+  const topFavoriteProducts = useMemo(
+    () => sortByFavoriteCount(products, 10).map((product, index) => ({
+      ...product,
+      rank: index + 1,
+    })),
+    [products]
+  );
+
+  const topFavoriteLookbooks = useMemo(
+    () => sortByFavoriteCount(lookbooks, 10).map((lookbook, index) => ({
+      ...lookbook,
+      rank: index + 1,
+    })),
+    [lookbooks]
+  );
+
+  const toggleFavorite = (productId) => {
+    setFavoriteIds((prev) => {
+      const id = Number(productId);
+      const isAdding = !prev.includes(id);
+      const next = toggleFavoriteId(prev, productId);
+
+      if (isAdding) {
+        const product = products.find((item) => Number(item.id) === id);
+        trackFavoriteProduct({
+          id: product?.id ?? productId,
+          name: product?.name,
+          brand: product?.brand,
+          price: product?.price,
+        });
+        void syncProductFavoriteCount(id, "add");
+        setProducts((prev) => prev.map((item) => (
+          item.id === id
+            ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) + 1) }
+            : item
+        )));
+      } else {
+        void syncProductFavoriteCount(id, "remove");
+        setProducts((prev) => prev.map((item) => (
+          item.id === id
+            ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) - 1) }
+            : item
+        )));
+      }
+
+      saveFavoriteIds(next);
+      return next;
+    });
+  };
+
+  const toggleFavoriteLookbook = (lookbookId) => {
+    setFavoriteLookbookIds((prev) => {
+      const id = Number(lookbookId);
+      const isAdding = !prev.includes(id);
+      const next = toggleFavoriteLookbookId(prev, lookbookId);
+
+      if (isAdding) {
+        const lookbook = lookbooks.find((item) => Number(item.id) === id);
+        trackFavoriteLookbook({
+          id: lookbook?.id ?? lookbookId,
+          title: lookbook?.title,
+          tag: lookbook?.tag,
+        });
+        void syncLookbookFavoriteCount(id, "add");
+        setLookbooks((prev) => prev.map((item) => (
+          item.id === id
+            ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) + 1) }
+            : item
+        )));
+      } else {
+        void syncLookbookFavoriteCount(id, "remove");
+        setLookbooks((prev) => prev.map((item) => (
+          item.id === id
+            ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) - 1) }
+            : item
+        )));
+      }
+
+      saveFavoriteLookbookIds(next);
+      return next;
+    });
+  };
+
+  const loadSalesRankings = async () => {
+    try {
+      const response = await fetch("/api/rankings/sales?limit=10&period=week");
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      setSalesRankings(Array.isArray(data.rankings) ? data.rankings : []);
+    } catch (error) {
+      console.error("讀取銷售排行失敗", error);
+    }
+  };
+
+  const runPrelaunchChecklist = async () => {
+    setPrelaunchLoading(true);
+    try {
+      const results = await runPrelaunchChecks({ lookbooksUrl: XANO_LOOKBOOKS_URL });
+      setPrelaunchChecks(results);
+    } finally {
+      setPrelaunchLoading(false);
+    }
+  };
+
   const brandOptions = ["all", ...Array.from(new Set(products.map((product) => product.brand).filter(Boolean)))];
   const homeBrandOptions = brandOptions.filter((brand) => brand !== "all").slice(0, 8);
-  const featuredProduct = filteredProducts[0] || products[0];
+  const featuredProduct = catalogFilteredProducts[0] || products[0];
 
   const shipping = subtotal > 0 ? 60 : 0;
   const total = subtotal + shipping;
 
+  useEffect(() => {
+    if (!mounted) return;
+
+    if (tab === "home") {
+      trackHomeView();
+    }
+  }, [mounted, tab]);
+
+  useEffect(() => {
+    if (!mounted || tab !== "product" || !selectedProduct) return;
+
+    trackProductView({
+      id: selectedProduct.id,
+      name: selectedProduct.name,
+      brand: selectedProduct.brand,
+      price: selectedProduct.price,
+    });
+  }, [mounted, tab, selectedProduct?.id]);
+
+  useEffect(() => {
+    if (tab !== "checkout") {
+      checkoutTrackedRef.current = false;
+      return;
+    }
+
+    if (!mounted || cart.length === 0 || checkoutTrackedRef.current) {
+      return;
+    }
+
+    checkoutTrackedRef.current = true;
+    trackBeginCheckout(
+      cart.map((item) => ({
+        id: item.id,
+        name: item.name,
+        brand: item.brand,
+        price: item.price,
+        quantity: item.qty,
+        color: item.color,
+        size: item.size,
+      })),
+      total
+    );
+  }, [mounted, tab, cart, total]);
+
+  useEffect(() => {
+    if (!mounted || tab !== "shop") return;
+
+    const term = shopSearchQuery.trim();
+    if (!term) return;
+
+    const timer = window.setTimeout(() => {
+      trackSearchProducts(term);
+    }, 600);
+
+    return () => window.clearTimeout(timer);
+  }, [mounted, tab, shopSearchQuery]);
+
   const openProduct = (product) => {
+    const colorOptions = getProductColorOptions(product);
+    const initialColor = product.variants?.[0]?.color || colorOptions[0] || "";
+    const sizeOptions = getSizeOptionsForColor(product, initialColor);
     setSelectedProduct(product);
-    setSelectedColor(product.variants?.[0]?.color || product.colors[0]);
-    setSelectedSize(product.variants?.[0]?.sizes?.find((size) => size.stock > 0)?.name || product.variants?.[0]?.sizes?.[0]?.name || product.sizes[0]);
+    setSelectedColor(initialColor);
+    setSelectedSize(
+      findFirstSelectableSize(sizeOptions)?.name
+      || sizeOptions[0]?.name
+      || getProductSizeNames(product)[0]
+      || ""
+    );
     setSelectedImageIndex(0);
+    setSizeAIResult(null);
     setTab("product");
+  };
+
+  const handleRecommendSize = () => {
+    if (!selectedProduct) {
+      return;
+    }
+
+    setSizeAIResult(
+      buildSizeRecommendation(selectedProduct, sizeAI, getAvailableSizeNames(selectedProduct))
+    );
+  };
+
+  const openBrandShop = (brand) => {
+    if (!brand?.trim()) return;
+    trackBrandClick(brand);
+    setActiveBrand(brand);
+    setActiveGender("all");
+    setShopSearchQuery("");
+    setTab("shop");
   };
 
   const requireLogin = (targetTab = "account") => {
@@ -751,9 +1114,26 @@ export default function JGoAppPrototype() {
   const addToCart = () => {
     if (!isSignedIn || !currentUser) return requireLogin();
 
-    if (!selectedSize || selectedSizeStock <= 0) {
+    const selectedSizeOption = getVariantForColorAndSize(selectedProduct, selectedColor, selectedSize);
+
+    if (selectedSizeOption?.stock_status === "out_of_stock") {
+      alert("此尺寸已售完");
+      return;
+    }
+
+    if (!selectedSize) {
+      alert("請選擇尺寸");
+      return;
+    }
+
+    const selectedSizeStock = getSizeStockQty(selectedSizeOption);
+    if (selectedSizeStock <= 0) {
       alert("這個顏色 / 尺寸目前缺貨");
       return;
+    }
+
+    if (selectedSizeOption?.stock_status === "unknown") {
+      alert("此商品庫存需確認，下單後我們會為你確認庫存");
     }
 
     const key = `${selectedProduct.id}-${selectedColor}-${selectedSize}`;
@@ -768,6 +1148,15 @@ export default function JGoAppPrototype() {
       }
       return [...prev, { key, ...selectedProduct, color: selectedColor, size: selectedSize, stock: selectedSizeStock, qty: 1 }];
     });
+    trackAddToCart([{
+      id: selectedProduct.id,
+      name: selectedProduct.name,
+      brand: selectedProduct.brand,
+      price: selectedProduct.price,
+      quantity: 1,
+      color: selectedColor,
+      size: selectedSize,
+    }]);
     setTab("cart");
   };
 
@@ -777,14 +1166,13 @@ export default function JGoAppPrototype() {
   };
 
   const getDefaultOutfitSelection = (product) => {
-    const firstVariant = product?.variants?.find((variant) =>
-      variant.sizes?.some((size) => Number(size.stock ?? 999) > 0)
-    ) || product?.variants?.[0];
-    const firstAvailableSize = firstVariant?.sizes?.find((size) => Number(size.stock ?? 999) > 0) || firstVariant?.sizes?.[0];
+    const firstColor = product?.variants?.[0]?.color || getProductColorOptions(product)[0] || "";
+    const sizeOptions = getSizeOptionsForColor(product, firstColor);
+    const firstSelectableSize = findFirstSelectableSize(sizeOptions);
 
     return {
-      color: firstVariant?.color || product?.colors?.[0] || "",
-      size: firstAvailableSize?.name || product?.sizes?.[0] || "",
+      color: firstColor,
+      size: firstSelectableSize?.name || getProductSizeNames(product)[0] || "",
     };
   };
 
@@ -816,12 +1204,7 @@ export default function JGoAppPrototype() {
     }));
   };
 
-  const getProductSizeOptionsByColor = (product, color) => {
-    const variant = product?.variants?.find((item) => item.color === color);
-    return variant?.sizes?.length
-      ? variant.sizes
-      : (product?.sizes || []).map((size) => ({ name: size, stock: 999 }));
-  };
+  const getProductSizeOptionsByColor = (product, color) => getSizeOptionsForColor(product, color);
 
   const addOutfitSelectionsToCart = () => {
     if (!isSignedIn || !currentUser) return requireLogin();
@@ -834,23 +1217,28 @@ export default function JGoAppPrototype() {
     }
 
     const nextItems = [];
+    let hasUnknownStock = false;
 
     for (const product of relatedProducts) {
       const selection = outfitSelections[product.id] || {};
       const color = selection.color;
       const size = selection.size;
       const sizeOptions = getProductSizeOptionsByColor(product, color);
-      const selectedSizeOption = sizeOptions.find((item) => item.name === size);
-      const stock = Number(selectedSizeOption?.stock ?? 999);
+      const selectedSizeOption = getVariantForColorAndSize(product, color, size) || sizeOptions.find((item) => item.name === size);
+      const stock = getSizeStockQty(selectedSizeOption);
 
       if (!color || !size) {
         alert(`請先選擇「${product.name}」的顏色與尺寸`);
         return;
       }
 
-      if (stock <= 0) {
-        alert(`「${product.name}」${color} / ${size} 目前缺貨`);
+      if (selectedSizeOption?.stock_status === "out_of_stock") {
+        alert(`「${product.name}」${color} / ${size} 此尺寸已售完`);
         return;
+      }
+
+      if (selectedSizeOption?.stock_status === "unknown") {
+        hasUnknownStock = true;
       }
 
       nextItems.push({
@@ -861,6 +1249,10 @@ export default function JGoAppPrototype() {
         stock,
         qty: 1,
       });
+    }
+
+    if (hasUnknownStock) {
+      alert("此商品庫存需確認，下單後我們會為你確認庫存");
     }
 
     setCart((prev) => {
@@ -881,6 +1273,16 @@ export default function JGoAppPrototype() {
 
       return nextCart;
     });
+
+    trackAddToCart(nextItems.map((item) => ({
+      id: item.id,
+      name: item.name,
+      brand: item.brand,
+      price: item.price,
+      quantity: 1,
+      color: item.color,
+      size: item.size,
+    })));
 
     alert(`已加入 ${nextItems.length} 件穿搭商品到購物車`);
     setTab("cart");
@@ -904,19 +1306,21 @@ export default function JGoAppPrototype() {
 
   const productImages = selectedProduct?.images?.length ? selectedProduct.images : [selectedProduct?.image].filter(Boolean);
 
-  const currentVariant = selectedProduct?.variants?.find(
-    (variant) => variant.color === selectedColor
-  );
-
-  const availableSizeOptions = currentVariant?.sizes?.length
-    ? currentVariant.sizes
-    : (selectedProduct?.sizes || []).map((size) => ({ name: size, stock: 999 }));
+  const availableSizeOptions = selectedProduct
+    ? getSizeOptionsForColor(selectedProduct, selectedColor)
+    : [];
 
   const availableSizes = availableSizeOptions.map((size) => size.name);
-  const selectedSizeStock = availableSizeOptions.find((size) => size.name === selectedSize)?.stock ?? 999;
+  const selectedSizeOption = getVariantForColorAndSize(selectedProduct, selectedColor, selectedSize);
+  const selectedProductDescription = selectedProduct ? getProductDescription(selectedProduct) : "";
+  const colorStockMaps = selectedProduct ? getColorStockMaps(selectedProduct) : { statusMap: {}, stockMap: {} };
+  const productFeatureText = buildProductFeatureText(selectedProduct, selectedProductDescription);
+  const productSizeInfoText = buildProductSizeInfoText(selectedProduct);
+  const brandIntroText = buildBrandIntroText(selectedProduct);
 
-  const fitRecommendation = useMemo(() => buildFitRecommendation(selectedProduct, sizeAI), [selectedProduct, sizeAI]);
-  const recommendedSize = fitRecommendation.size;
+  useEffect(() => {
+    setSizeAIResult(null);
+  }, [selectedProduct?.id]);
 
   const goToPrevImage = () => {
     if (productImages.length <= 1) return;
@@ -1064,6 +1468,7 @@ export default function JGoAppPrototype() {
             shippingStatus: order.shipping_status || (order.payment_status === "Paid" ? "待出貨" : "未付款"),
             trackingNo: order.tracking_no || "",
             shippingCompany: order.shipping_company || "",
+            shippedAt: order.shipped_at || "",
             createdAt: order.created_at ? new Date(Number(order.created_at)).toLocaleString("zh-TW") : ""
           };
         })
@@ -1132,6 +1537,7 @@ export default function JGoAppPrototype() {
             shippingStatus: order.shipping_status || "待出貨",
             trackingNo: order.tracking_no || "",
             shippingCompany: order.shipping_company || "",
+            shippedAt: order.shipped_at || "",
             customerName: order.customer_name || "",
             customerEmail: order.customer_email || "",
             createdAt: order.created_at
@@ -1188,12 +1594,14 @@ export default function JGoAppPrototype() {
     }));
   };
 
-  const updateOrderTracking = async (order) => {
+  const saveOrderShipping = async (order) => {
     if (!isAdmin) return;
 
     const form = trackingForms[order.id] || {};
     const trackingNo = (form.trackingNo ?? order.trackingNo ?? "").trim();
     const shippingCompany = (form.shippingCompany ?? order.shippingCompany ?? "").trim();
+    const shippedAtInput = form.shippedAt ?? toDatetimeLocalValue(order.shippedAt) ?? toDatetimeLocalValue(Date.now());
+    const shipped_at = toIsoDateTime(shippedAtInput);
 
     if (!trackingNo) {
       alert("請輸入物流單號");
@@ -1201,30 +1609,35 @@ export default function JGoAppPrototype() {
     }
 
     if (!shippingCompany) {
-      alert("請輸入物流公司，例如 7-11、全家、黑貓");
+      alert("請輸入物流公司，例如 7-ELEVEN、全家、黑貓");
       return;
     }
 
     try {
-      const response = await fetch(XANO_UPDATE_TRACKING_URL, {
-        method: "POST",
+      const response = await fetch("/api/admin/orders/shipping", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           order_id: order.id,
           tracking_no: trackingNo,
           shipping_company: shippingCompany,
+          shipped_at,
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`更新物流失敗：${response.status}，${text}`);
+        throw new Error(data.error || "更新物流失敗");
       }
+
+      const nextShippedAt = data.shipped_at || shipped_at;
 
       setOrders((prev) => prev.map((item) => item.id === order.id ? {
         ...item,
         trackingNo,
         shippingCompany,
+        shippedAt: nextShippedAt,
         shippingStatus: "已出貨",
       } : item));
 
@@ -1232,15 +1645,16 @@ export default function JGoAppPrototype() {
         ...prev,
         trackingNo,
         shippingCompany,
+        shippedAt: nextShippedAt,
         shippingStatus: "已出貨",
       } : prev);
 
       setTrackingForms((prev) => ({
         ...prev,
-        [order.id]: { trackingNo, shippingCompany },
+        [order.id]: { trackingNo, shippingCompany, shippedAt: toDatetimeLocalValue(nextShippedAt) },
       }));
 
-      alert("物流資訊已更新");
+      alert("出貨資訊已儲存");
     } catch (error) {
       console.error(error);
       alert(error.message || "更新物流失敗");
@@ -1492,7 +1906,9 @@ export default function JGoAppPrototype() {
             </button>
             <button onClick={() => setTab("cart")} className="relative rounded-full bg-neutral-900 p-3 text-white">
               <ShoppingBag size={20} />
-              {cart.length > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-xs">{cart.length}</span>}
+              {mounted && cartCount > 0 && (
+                <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-xs">{cartCount}</span>
+              )}
             </button>
           </div>
           </div>
@@ -1539,6 +1955,25 @@ export default function JGoAppPrototype() {
                     </button>
                   ))}
                 </div>
+              </section>
+
+              <section className="grid grid-cols-3 gap-2">
+                {HOME_TRUST_CARDS.map((item, index) => {
+                  const Icon = index === 0 ? ShieldCheck : index === 1 ? Clock : Package;
+
+                  return (
+                    <div
+                      key={item.key}
+                      className="rounded-[1.4rem] bg-white p-3 text-center shadow-sm ring-1 ring-neutral-100"
+                    >
+                      <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-neutral-900 text-white">
+                        <Icon size={16} />
+                      </div>
+                      <p className="mt-2 text-[11px] font-black leading-tight text-neutral-900">{item.title}</p>
+                      <p className="mt-1 text-[9px] font-bold leading-4 text-neutral-500">{item.description}</p>
+                    </div>
+                  );
+                })}
               </section>
 
               <section className="relative overflow-hidden rounded-[2rem] bg-neutral-900 shadow-2xl">
@@ -1591,23 +2026,30 @@ export default function JGoAppPrototype() {
                 {lookbooks.length > 0 ? (
                   <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
                     {lookbooks.slice(0, 4).map((lookbook, index) => (
-                      <button
-                        key={lookbook.id}
-                        onClick={() => {
-                          setSelectedLookbook(lookbook);
-                          setTab("lookbook-detail");
-                        }}
-                        className="group relative h-[218px] min-w-[150px] overflow-hidden rounded-[1.6rem] bg-neutral-100 text-left shadow-[0_14px_30px_rgba(0,0,0,0.1)] transition active:scale-[0.98]"
-                      >
-                        <img src={lookbook.image} alt={lookbook.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
-                        <span className="absolute left-3 top-3 rounded-full bg-neutral-950/90 px-2.5 py-1 text-[10px] font-black text-white">{String(index + 1).padStart(2, "0")}</span>
-                        <div className="absolute bottom-3 left-3 right-3 text-white">
-                          <p className="text-[15px] font-black leading-tight">{lookbook.tag || "STYLE"}</p>
-                          <p className="mt-1 line-clamp-2 text-[11px] font-bold leading-4 text-white/85">{lookbook.title}</p>
-                          <span className="mt-3 inline-block rounded-full bg-white/90 px-3 py-1.5 text-[10px] font-black text-neutral-900">查看整套</span>
+                      <div key={lookbook.id} className="relative shrink-0">
+                        <button
+                          onClick={() => {
+                            setSelectedLookbook(lookbook);
+                            setTab("lookbook-detail");
+                          }}
+                          className="group relative h-[218px] min-w-[150px] overflow-hidden rounded-[1.6rem] bg-neutral-100 text-left shadow-[0_14px_30px_rgba(0,0,0,0.1)] transition active:scale-[0.98]"
+                        >
+                          <img src={lookbook.image} alt={lookbook.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+                          <span className="absolute left-3 top-3 rounded-full bg-neutral-950/90 px-2.5 py-1 text-[10px] font-black text-white">{String(index + 1).padStart(2, "0")}</span>
+                          <div className="absolute bottom-3 left-3 right-3 text-white">
+                            <p className="text-[15px] font-black leading-tight">{lookbook.tag || "STYLE"}</p>
+                            <p className="mt-1 line-clamp-2 text-[11px] font-bold leading-4 text-white/85">{lookbook.title}</p>
+                            <span className="mt-3 inline-block rounded-full bg-white/90 px-3 py-1.5 text-[10px] font-black text-neutral-900">查看整套</span>
+                          </div>
+                        </button>
+                        <div className="absolute right-3 top-3 z-10">
+                          <FavoriteHeartButton
+                            isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                            onToggle={() => toggleFavoriteLookbook(lookbook.id)}
+                          />
                         </div>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 ) : (
@@ -1635,11 +2077,7 @@ export default function JGoAppPrototype() {
                   {homeBrandOptions.slice(0, 6).map((brand) => (
                     <button
                       key={brand}
-                      onClick={() => {
-                        setActiveBrand(brand);
-                        setActiveGender("all");
-                        setTab("shop");
-                      }}
+                      onClick={() => openBrandShop(brand)}
                       className="min-w-[82px] text-center transition active:scale-[0.98]"
                     >
                       <div className="mx-auto flex h-[76px] w-[76px] items-center justify-center rounded-full bg-gradient-to-br from-white to-neutral-100 px-2 text-center text-[11px] font-black leading-tight text-neutral-900 shadow-[0_12px_28px_rgba(0,0,0,0.08)] ring-1 ring-neutral-100">
@@ -1688,13 +2126,104 @@ export default function JGoAppPrototype() {
 
               <section>
                 <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-xl font-black tracking-tight">本週熱賣商品</h3>
+                  <button onClick={() => setTab("shop")} className="text-xs font-black text-neutral-500">看全部 ›</button>
+                </div>
+                {topSalesProducts.length === 0 ? (
+                  <div className="rounded-[1.6rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-400">
+                    目前還沒有銷售排行資料。
+                  </div>
+                ) : (
+                  <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {topSalesProducts.map((product) => (
+                      <RankingProductCard
+                        key={`sales-${product.id}`}
+                        product={product}
+                        rank={product.rank}
+                        metricLabel={`已售出 ${product.soldCount} 件`}
+                        isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                        onToggleFavorite={toggleFavorite}
+                        onClick={() => openProduct(product)}
+                        compact
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-xl font-black tracking-tight">人氣收藏商品</h3>
+                  <button onClick={() => setTab("shop")} className="text-xs font-black text-neutral-500">看全部 ›</button>
+                </div>
+                {topFavoriteProducts.length === 0 ? (
+                  <div className="rounded-[1.6rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-400">
+                    目前還沒有收藏排行資料。
+                  </div>
+                ) : (
+                  <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {topFavoriteProducts.map((product) => (
+                      <RankingProductCard
+                        key={`favorite-${product.id}`}
+                        product={product}
+                        rank={product.rank}
+                        metricLabel={`收藏 ${product.favoriteCount || 0} 次`}
+                        isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                        onToggleFavorite={toggleFavorite}
+                        onClick={() => openProduct(product)}
+                        compact
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-xl font-black tracking-tight">人氣穿搭排行</h3>
+                  <button onClick={() => setTab("lookbook")} className="text-xs font-black text-neutral-500">看全部 ›</button>
+                </div>
+                {topFavoriteLookbooks.length === 0 ? (
+                  <div className="rounded-[1.6rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-400">
+                    目前還沒有穿搭收藏排行資料。
+                  </div>
+                ) : (
+                  <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {topFavoriteLookbooks.map((lookbook) => (
+                      <RankingLookbookCard
+                        key={`home-lookbook-rank-${lookbook.id}`}
+                        lookbook={lookbook}
+                        rank={lookbook.rank}
+                        metricLabel={`收藏 ${lookbook.favoriteCount || 0} 次`}
+                        isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                        onToggleFavorite={toggleFavoriteLookbook}
+                        onClick={() => {
+                          setSelectedLookbook(lookbook);
+                          setTab("lookbook-detail");
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-xl font-black tracking-tight">新品上架</h3>
                   <button onClick={() => setTab("shop")} className="text-xs font-black text-neutral-500">看全部 ›</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  {filteredProducts
+                  {catalogFilteredProducts
                     .slice(0, 4)
-                    .map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
+                    .map((product) => (
+                      <ProductCard
+                        key={product.id}
+                        product={product}
+                        isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                        onToggleFavorite={toggleFavorite}
+                        onClick={() => openProduct(product)}
+                      />
+                    ))}
                 </div>
               </section>
             </motion.div>
@@ -1728,6 +2257,34 @@ export default function JGoAppPrototype() {
                 ))}
               </div>
 
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-xl font-black tracking-tight">人氣穿搭排行</h3>
+                </div>
+                {topFavoriteLookbooks.length === 0 ? (
+                  <div className="rounded-3xl bg-neutral-50 p-6 text-center text-sm font-bold text-neutral-400">
+                    目前還沒有穿搭收藏排行資料。
+                  </div>
+                ) : (
+                  <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {topFavoriteLookbooks.map((lookbook) => (
+                      <RankingLookbookCard
+                        key={`lookbook-rank-${lookbook.id}`}
+                        lookbook={lookbook}
+                        rank={lookbook.rank}
+                        metricLabel={`收藏 ${lookbook.favoriteCount || 0} 次`}
+                        isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                        onToggleFavorite={toggleFavoriteLookbook}
+                        onClick={() => {
+                          setSelectedLookbook(lookbook);
+                          setTab("lookbook-detail");
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
               {lookbooks.length === 0 ? (
                 <div className="rounded-3xl bg-neutral-50 p-8 text-center">
                   <Sparkles className="mx-auto mb-3 text-neutral-400" size={36} />
@@ -1757,6 +2314,13 @@ export default function JGoAppPrototype() {
 
                             <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1.5 text-sm font-black text-neutral-800 backdrop-blur">
                               #{String(index + 1).padStart(2, "0")}
+                            </div>
+
+                            <div className="absolute right-4 top-4 z-10">
+                              <FavoriteHeartButton
+                                isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                                onToggle={() => toggleFavoriteLookbook(lookbook.id)}
+                              />
                             </div>
 
                             {relatedProducts.length > 0 && (
@@ -1833,16 +2397,15 @@ export default function JGoAppPrototype() {
                 <p className="text-sm leading-6 text-neutral-500">每件商品都先選好顏色與尺寸，再加入整套到購物車。</p>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-4 pb-[180px]">
                 {getLookbookProducts(selectedLookbook).map((product) => {
                   const selection = outfitSelections[product.id] || getDefaultOutfitSelection(product);
-                  const colorOptions = product.variants?.length
-                    ? product.variants.map((variant) => variant.color).filter(Boolean)
-                    : product.colors || [];
+                  const colorOptions = getProductColorOptions(product);
                   const sizeOptions = getProductSizeOptionsByColor(product, selection.color);
                   const sizeNames = sizeOptions.map((item) => item.name);
-                  const disabledSizeNames = sizeOptions.filter((item) => Number(item.stock ?? 999) <= 0).map((item) => item.name);
-                  const stockMap = Object.fromEntries(sizeOptions.map((item) => [item.name, Number(item.stock ?? 999)]));
+                  const disabledSizeNames = sizeOptions.filter((item) => isSizeOutOfStock(item)).map((item) => item.name);
+                  const statusMap = Object.fromEntries(sizeOptions.map((item) => [item.name, item.stock_status || "unknown"]));
+                  const stockMap = Object.fromEntries(sizeOptions.map((item) => [item.name, getSizeStockQty(item)]));
 
                   return (
                     <Card key={product.id} className="rounded-[2rem] border-neutral-100 shadow-sm">
@@ -1864,7 +2427,7 @@ export default function JGoAppPrototype() {
                           value={selection.color}
                           setValue={(color) => {
                             const nextSizeOptions = getProductSizeOptionsByColor(product, color);
-                            const nextSize = nextSizeOptions.find((item) => Number(item.stock ?? 999) > 0)?.name || nextSizeOptions[0]?.name || "";
+                            const nextSize = findFirstSelectableSize(nextSizeOptions)?.name || nextSizeOptions[0]?.name || "";
                             updateOutfitSelection(product.id, { color, size: nextSize });
                           }}
                         />
@@ -1875,6 +2438,7 @@ export default function JGoAppPrototype() {
                           value={selection.size}
                           setValue={(size) => updateOutfitSelection(product.id, { size })}
                           disabledOptions={disabledSizeNames}
+                          statusMap={statusMap}
                           stockMap={stockMap}
                         />
                       </CardContent>
@@ -1883,17 +2447,19 @@ export default function JGoAppPrototype() {
                 })}
               </div>
 
-              <div className="sticky bottom-20 z-10 rounded-[2rem] border border-neutral-100 bg-white/95 p-4 shadow-2xl backdrop-blur">
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-black tracking-widest text-neutral-400">OUTFIT TOTAL</p>
-                    <p className="text-xl font-black">{formatPrice(getLookbookProducts(selectedLookbook).reduce((sum, product) => sum + Number(product.price || 0), 0))}</p>
+              <div className="fixed bottom-[72px] left-1/2 z-20 w-full max-w-md -translate-x-1/2 px-5">
+                <div className="rounded-[2rem] border border-neutral-100 bg-white/95 p-4 shadow-2xl backdrop-blur">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-black tracking-widest text-neutral-400">OUTFIT TOTAL</p>
+                      <p className="text-xl font-black">{formatPrice(getLookbookProducts(selectedLookbook).reduce((sum, product) => sum + Number(product.price || 0), 0))}</p>
+                    </div>
+                    <p className="text-sm font-bold text-neutral-500">{getLookbookProducts(selectedLookbook).length} 件商品</p>
                   </div>
-                  <p className="text-sm font-bold text-neutral-500">{getLookbookProducts(selectedLookbook).length} 件商品</p>
+                  <Button onClick={addOutfitSelectionsToCart} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
+                    🛍 加入整套購物車
+                  </Button>
                 </div>
-                <Button onClick={addOutfitSelectionsToCart} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
-                  🛍 加入整套購物車
-                </Button>
               </div>
             </motion.div>
           )}
@@ -1914,7 +2480,13 @@ export default function JGoAppPrototype() {
                   {products
                     .filter((product) => selectedLookbook.product_ids.includes(Number(product.id)))
                     .map((product) => (
-                      <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />
+                      <ProductCard
+                        key={product.id}
+                        product={product}
+                        isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                        onToggleFavorite={toggleFavorite}
+                        onClick={() => openProduct(product)}
+                      />
                     ))}
                 </div>
               </section>
@@ -1923,10 +2495,32 @@ export default function JGoAppPrototype() {
 
           {tab === "shop" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-              <div className="flex items-center gap-2 rounded-2xl bg-neutral-100 px-4 py-3">
-                <Search size={18} className="text-neutral-400" />
-                <span className="text-sm text-neutral-500">搜尋日系襯衫、寬褲、外套</span>
+              <div>
+                <p className="text-sm font-bold tracking-widest text-neutral-400">SHOP</p>
+                <h2 className="text-2xl font-black tracking-tight">
+                  {activeBrand !== "all" ? `${activeBrand} 全部商品` : "全部商品"}
+                </h2>
               </div>
+
+              <label className="flex items-center gap-2 rounded-2xl bg-neutral-100 px-4 py-3">
+                <Search size={18} className="shrink-0 text-neutral-400" />
+                <input
+                  type="search"
+                  value={shopSearchQuery}
+                  onChange={(event) => setShopSearchQuery(event.target.value)}
+                  placeholder="搜尋商品名稱、品牌、JGO-57、ZOZO ID"
+                  className="w-full bg-transparent text-sm text-neutral-900 outline-none placeholder:text-neutral-500"
+                />
+                {shopSearchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setShopSearchQuery("")}
+                    className="shrink-0 rounded-full bg-neutral-200 px-2 py-1 text-[11px] font-black text-neutral-600"
+                  >
+                    清除
+                  </button>
+                ) : null}
+              </label>
 
               <div className="space-y-2">
                 <p className="text-sm font-black">性別分類</p>
@@ -1954,7 +2548,12 @@ export default function JGoAppPrototype() {
                   {brandOptions.map((brand) => (
                     <button
                       key={brand}
-                      onClick={() => setActiveBrand(brand)}
+                      onClick={() => {
+                        if (brand !== "all") {
+                          trackBrandClick(brand);
+                        }
+                        setActiveBrand(brand);
+                      }}
                       className={`shrink-0 rounded-2xl px-4 py-2 text-xs font-black ${activeBrand === brand ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
                     >
                       {brand === "all" ? "全部品牌" : brand}
@@ -1967,11 +2566,12 @@ export default function JGoAppPrototype() {
                 <p className="text-sm font-bold text-neutral-500">
                   共 {filteredProducts.length} 件商品
                 </p>
-                {(activeGender !== "all" || activeBrand !== "all") && (
+                {(activeGender !== "all" || activeBrand !== "all" || shopSearchQuery.trim()) && (
                   <button
                     onClick={() => {
                       setActiveGender("all");
                       setActiveBrand("all");
+                      setShopSearchQuery("");
                     }}
                     className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-black text-neutral-600"
                   >
@@ -1983,11 +2583,19 @@ export default function JGoAppPrototype() {
               {filteredProducts.length === 0 ? (
                 <div className="rounded-[2rem] bg-neutral-50 p-8 text-center">
                   <h3 className="font-black">目前沒有符合的商品</h3>
-                  <p className="mt-1 text-sm text-neutral-500">可以切換性別或品牌分類看看。</p>
+                  <p className="mt-1 text-sm text-neutral-500">可以切換性別、品牌分類或調整搜尋關鍵字。</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-3">
-                  {filteredProducts.map((product) => <ProductCard key={product.id} product={product} onClick={() => openProduct(product)} />)}
+                  {filteredProducts.map((product) => (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                      onToggleFavorite={toggleFavorite}
+                      onClick={() => openProduct(product)}
+                    />
+                  ))}
                 </div>
               )}
             </motion.div>
@@ -2035,63 +2643,160 @@ export default function JGoAppPrototype() {
                   </div>
                 )}
               </div>
-              <div>
-                <p className="text-sm text-neutral-500">{selectedProduct.brand}</p>
-                <h2 className="text-2xl font-black">{selectedProduct.name}</h2>
-                <div className="mt-2 flex items-end gap-2">
-                  <span className="text-xl font-black">{formatPrice(selectedProduct.price)}</span>
-                  <span className="text-sm text-neutral-400 line-through">{formatPrice(selectedProduct.compareAt)}</span>
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => openBrandShop(selectedProduct.brand)}
+                      className="text-sm font-bold text-neutral-700 underline decoration-neutral-300 underline-offset-4"
+                    >
+                      {selectedProduct.brand}
+                    </button>
+                    <h2 className="mt-1 text-2xl font-black">{selectedProduct.name}</h2>
+                    <div className="mt-2 flex items-end gap-2">
+                      <span className="text-xl font-black">{formatPrice(selectedProduct.price)}</span>
+                      <span className="text-sm text-neutral-400 line-through">{formatPrice(selectedProduct.compareAt)}</span>
+                    </div>
+                  </div>
+                  <FavoriteHeartButton
+                    isFavorite={isFavoriteProduct(favoriteIds, selectedProduct.id)}
+                    onToggle={() => toggleFavorite(selectedProduct.id)}
+                    className="h-11 w-11 shrink-0"
+                  />
                 </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {PRODUCT_TRUST_BADGES.map((badge) => (
+                    <span
+                      key={badge}
+                      className="rounded-full bg-neutral-900 px-3 py-1.5 text-xs font-black text-white"
+                    >
+                      {badge}
+                    </span>
+                  ))}
+                </div>
+
+                <Card className="rounded-3xl border-neutral-100 bg-neutral-50 shadow-sm">
+                  <CardContent className="space-y-2 p-4">
+                    <p className="text-xs font-black tracking-widest text-neutral-400">PRODUCT INFO</p>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-neutral-400">品牌</p>
+                        <button
+                          type="button"
+                          onClick={() => openBrandShop(selectedProduct.brand)}
+                          className="font-bold text-neutral-900 underline decoration-neutral-300 underline-offset-2"
+                        >
+                          {selectedProduct.brand}
+                        </button>
+                      </div>
+                      <div>
+                        <p className="text-xs text-neutral-400">商品編號</p>
+                        <p className="font-bold text-neutral-900">JGO-{selectedProduct.id}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-neutral-400">商品性別</p>
+                        <p className="font-bold text-neutral-900">{formatProductGender(selectedProduct.gender)}</p>
+                      </div>
+                      {(() => {
+                        const modelDisplay = formatModelSizeDisplay({
+                          model_height_cm: selectedProduct.modelHeightCm || null,
+                          model_weight_kg: selectedProduct.modelWeightKg || null,
+                          model_wear_size: selectedProduct.modelWearSize || "",
+                        });
+
+                        return modelDisplay ? (
+                          <div className="col-span-2">
+                            <p className="font-bold text-neutral-900">{modelDisplay}</p>
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
               <OptionGroup
                 title="顏色"
-                options={selectedProduct.colors}
+                options={getProductColorOptions(selectedProduct)}
                 value={selectedColor}
                 setValue={(color) => {
-                  const nextVariant = selectedProduct.variants?.find((variant) => variant.color === color);
-                  const firstAvailableSize = nextVariant?.sizes?.find((size) => size.stock > 0)?.name || nextVariant?.sizes?.[0]?.name || "";
+                  const nextSizeOptions = getSizeOptionsForColor(selectedProduct, color);
+                  const firstAvailableSize = findFirstSelectableSize(nextSizeOptions)?.name || nextSizeOptions[0]?.name || "";
                   setSelectedColor(color);
                   setSelectedSize(firstAvailableSize);
                 }}
+                disabledOptions={Object.entries(colorStockMaps.statusMap)
+                  .filter(([, status]) => status === "out_of_stock")
+                  .map(([color]) => color)}
+                statusMap={colorStockMaps.statusMap}
+                stockMap={colorStockMaps.stockMap}
               />
               <OptionGroup
                 title="尺寸"
                 options={availableSizes}
                 value={selectedSize}
                 setValue={setSelectedSize}
-                disabledOptions={availableSizeOptions.filter((size) => size.stock <= 0).map((size) => size.name)}
-                stockMap={Object.fromEntries(availableSizeOptions.map((size) => [size.name, size.stock]))}
+                disabledOptions={availableSizeOptions.filter((size) => isSizeOutOfStock(size)).map((size) => size.name)}
+                statusMap={Object.fromEntries(availableSizeOptions.map((size) => [size.name, size.stock_status || "unknown"]))}
+                stockMap={Object.fromEntries(availableSizeOptions.map((size) => [size.name, getSizeStockQty(size)]))}
               />
-              {selectedSize && selectedSizeStock <= 3 && selectedSizeStock > 0 && (
-                <p className="text-sm font-bold text-red-500">此尺寸只剩 {selectedSizeStock} 件</p>
-              )}
-              {selectedSize && selectedSizeStock <= 0 && (
-                <p className="text-sm font-bold text-red-500">此尺寸目前缺貨</p>
-              )}
-              {(selectedProduct.description || selectedProduct.material || selectedProduct.fit || formatModelInfo(selectedProduct) || selectedProduct.sizeChart) && (
+              {(productFeatureText || productSizeInfoText || brandIntroText || selectedProduct.sizeChart || selectedProduct.sizeTableJson?.length > 0) && (
                 <Card className="rounded-3xl border-neutral-100 bg-neutral-50 shadow-sm">
-                  <CardContent className="space-y-5 p-5">
+                  <CardContent className="space-y-3 p-5">
                     <div>
                       <p className="text-xs font-black tracking-widest text-neutral-400">PRODUCT DETAILS</p>
-                      <h3 className="mt-1 text-lg font-black">商品介紹與尺寸表</h3>
+                      <h3 className="mt-1 text-lg font-black">商品介紹</h3>
                     </div>
-
-                    {selectedProduct.description && (
-                      <DetailBlock title="商品介紹" text={selectedProduct.description} />
-                    )}
-
-                    <div className="grid grid-cols-2 gap-3">
-                      {selectedProduct.material && <DetailBlock title="材質" text={selectedProduct.material} />}
-                      {selectedProduct.fit && <DetailBlock title="版型" text={selectedProduct.fit} />}
-                    </div>
-
-                    {formatModelInfo(selectedProduct) && (
-                      <DetailBlock title="Model 參考" text={formatModelInfo(selectedProduct)} />
-                    )}
-
-                    {selectedProduct.sizeChart && (
-                      <SizeChartTable sizeChart={selectedProduct.sizeChart} />
-                    )}
+                    <ProductAccordion
+                      sections={[
+                        {
+                          key: "features",
+                          title: "商品特色",
+                          content: productFeatureText ? (
+                            <p className="whitespace-pre-wrap text-sm leading-6 text-neutral-600">{productFeatureText}</p>
+                          ) : null,
+                        },
+                        {
+                          key: "size-info",
+                          title: "尺寸資訊",
+                          content:
+                            selectedProduct.sizeTableJson?.length > 0 ||
+                            productSizeInfoText ||
+                            selectedProduct.sizeChart ? (
+                              <div className="space-y-4">
+                                {selectedProduct.sizeTableJson?.length > 0 ? (
+                                  <SizeTableJsonTable rows={selectedProduct.sizeTableJson} />
+                                ) : null}
+                                {productSizeInfoText ? (
+                                  <p className="whitespace-pre-wrap text-sm leading-6 text-neutral-600">
+                                    {productSizeInfoText}
+                                  </p>
+                                ) : null}
+                                {!selectedProduct.sizeTableJson?.length && selectedProduct.sizeChart ? (
+                                  <SizeChartTable sizeChart={selectedProduct.sizeChart} />
+                                ) : null}
+                              </div>
+                            ) : null,
+                        },
+                        {
+                          key: "brand",
+                          title: "品牌介紹",
+                          content: brandIntroText ? (
+                            <div className="space-y-3">
+                              <p className="whitespace-pre-wrap text-sm leading-6 text-neutral-600">{brandIntroText}</p>
+                              <button
+                                type="button"
+                                onClick={() => openBrandShop(selectedProduct.brand)}
+                                className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-bold text-white"
+                              >
+                                查看 {selectedProduct.brand} 更多商品
+                              </button>
+                            </div>
+                          ) : null,
+                        },
+                      ]}
+                    />
                   </CardContent>
                 </Card>
               )}
@@ -2127,56 +2832,65 @@ export default function JGoAppPrototype() {
                       onChange={(value) => setSizeAI({ ...sizeAI, height: value })}
                     />
                     <Input
-                      label="體重"
+                      label="體重（選填）"
                       placeholder="68"
                       value={sizeAI.weight}
                       onChange={(value) => setSizeAI({ ...sizeAI, weight: value })}
                     />
                   </div>
 
-                  {recommendedSize && (
+                  <Button
+                    onClick={handleRecommendSize}
+                    className="h-11 w-full rounded-2xl bg-neutral-900 text-sm font-black text-white"
+                  >
+                    推薦尺寸
+                  </Button>
+
+                  {sizeAIResult && (
                     <div className="space-y-3 rounded-3xl bg-neutral-900 p-5 text-white">
                       <div>
                         <p className="text-xs font-bold tracking-widest text-neutral-400">AI FIT REPORT</p>
-                        <div className="mt-2 flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-4xl font-black">{recommendedSize}</p>
-                            <p className="mt-1 text-sm text-neutral-300">
-                              {sizeAI.gender === "male" ? "男性" : "女性"}｜{sizeAI.height}cm / {sizeAI.weight}kg
-                            </p>
+                        {sizeAIResult.canRecommend && sizeAIResult.recommendedSize ? (
+                          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                            <div className="rounded-2xl bg-white/10 p-3">
+                              <p className="text-[11px] text-neutral-300">推薦尺寸</p>
+                              <p className="mt-1 text-2xl font-black">{sizeAIResult.recommendedSize}</p>
+                            </div>
+                            <div className="rounded-2xl bg-white/5 p-3">
+                              <p className="text-[11px] text-neutral-300">合身建議</p>
+                              <p className="mt-1 text-xl font-black">{sizeAIResult.fitSize}</p>
+                            </div>
+                            <div className="rounded-2xl bg-white/5 p-3">
+                              <p className="text-[11px] text-neutral-300">寬鬆建議</p>
+                              <p className="mt-1 text-xl font-black">{sizeAIResult.looseSize}</p>
+                            </div>
                           </div>
-                          <button
-                            onClick={() => setSelectedSize(recommendedSize)}
-                            className="rounded-2xl bg-white px-4 py-2 text-sm font-black text-neutral-900"
-                          >
-                            使用此尺寸
-                          </button>
-                        </div>
+                        ) : (
+                          <p className="mt-2 text-sm text-neutral-300">
+                            {sizeAIResult.errorMessage || "暫無法計算推薦尺寸"}
+                          </p>
+                        )}
                       </div>
 
                       <div className="rounded-2xl bg-white/10 p-4 text-sm leading-6 text-neutral-200">
-                        <p>✔ {fitRecommendation.reason}</p>
-                        <p>✔ 建議版型：{selectedProduct.fit || "正常偏寬鬆"}</p>
-                        <p>✔ 想穿 Oversize：可選大一號</p>
-
-                        <div className="mt-3 border-t border-white/10 pt-3">
-                          <p className="font-bold text-white">Model 參考</p>
-                          <p className="mt-1">{formatModelInfo(selectedProduct) || "尚未設定 Model 資訊"}</p>
-                          {fitRecommendation.details?.map((detail) => (
-                            <p key={detail} className="mt-1 text-xs text-neutral-300">{detail}</p>
-                          ))}
-                        </div>
-
-                        {(selectedProduct.recommendedHeight || selectedProduct.recommendedWeight) && (
-                          <div className="mt-3 rounded-2xl bg-white/10 px-3 py-2 text-xs text-neutral-300">
-                            商品建議範圍：{selectedProduct.recommendedHeight || "-"}cm / {selectedProduct.recommendedWeight || "-"}kg
-                          </div>
-                        )}
-
-                        <div className="mt-3 rounded-2xl bg-white/10 px-3 py-2 text-xs text-neutral-300">
-                          目前為 Model 參考推估版，之後可接肩寬、胸寬、腰圍做更精準推薦。
-                        </div>
+                        <p className="font-bold text-white">推薦理由</p>
+                        <p className="mt-1">{sizeAIResult.reason}</p>
+                        {sizeAIResult.dataSource ? (
+                          <p className="mt-3 border-t border-white/10 pt-3 text-xs text-neutral-300">
+                            資料來源：{sizeAIResult.dataSource}
+                          </p>
+                        ) : null}
                       </div>
+
+                      {sizeAIResult.canRecommend && sizeAIResult.recommendedSize ? (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSize(sizeAIResult.recommendedSize)}
+                          className="h-11 w-full rounded-2xl bg-white text-sm font-black text-neutral-900"
+                        >
+                          使用推薦尺寸 {sizeAIResult.recommendedSize}
+                        </button>
+                      ) : null}
                     </div>
                   )}
                 </CardContent>
@@ -2184,6 +2898,127 @@ export default function JGoAppPrototype() {
 
               <Button onClick={addToCart} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">加入購物車</Button>
               {!currentUser && <p className="text-center text-sm text-neutral-400">登入後才能加入購物車與結帳</p>}
+            </motion.div>
+          )}
+
+          {tab === "favorites" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <div>
+                <p className="text-sm font-bold tracking-widest text-neutral-400">FAVORITES</p>
+                <h2 className="text-2xl font-black tracking-tight">我的收藏</h2>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-neutral-100 p-1">
+                {[
+                  { key: "products", label: "商品收藏" },
+                  { key: "lookbooks", label: "穿搭收藏" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setFavoritesTab(item.key)}
+                    className={`rounded-xl py-2.5 text-sm font-black ${favoritesTab === item.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500"}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              {favoritesTab === "products" ? (
+                <>
+                  <p className="text-sm text-neutral-500">共 {favoriteProducts.length} 件商品</p>
+
+                  {favoriteProducts.length === 0 ? (
+                    <div className="rounded-[2rem] bg-neutral-50 p-8 text-center">
+                      <Heart size={28} className="mx-auto text-neutral-300" />
+                      <h3 className="mt-4 font-black">還沒有收藏商品</h3>
+                      <p className="mt-1 text-sm text-neutral-500">在商品卡片或詳情頁按愛心即可加入收藏。</p>
+                      <button
+                        type="button"
+                        onClick={() => setTab("shop")}
+                        className="mt-5 rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-black text-white"
+                      >
+                        前往選購
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
+                      {favoriteProducts.map((product) => (
+                        <ProductCard
+                          key={product.id}
+                          product={product}
+                          isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                          onToggleFavorite={toggleFavorite}
+                          onClick={() => openProduct(product)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-neutral-500">共 {favoriteLookbooks.length} 套穿搭</p>
+
+                  {favoriteLookbooks.length === 0 ? (
+                    <div className="rounded-[2rem] bg-neutral-50 p-8 text-center">
+                      <Heart size={28} className="mx-auto text-neutral-300" />
+                      <h3 className="mt-4 font-black">還沒有收藏穿搭</h3>
+                      <p className="mt-1 text-sm text-neutral-500">在 Lookbook 卡片右上角按愛心即可加入收藏。</p>
+                      <button
+                        type="button"
+                        onClick={() => setTab("lookbook")}
+                        className="mt-5 rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-black text-white"
+                      >
+                        前往穿搭
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {favoriteLookbooks.map((lookbook) => {
+                        const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
+
+                        return (
+                          <Card key={lookbook.id} className="overflow-hidden rounded-[2rem] border-neutral-100 shadow-sm">
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedLookbook(lookbook);
+                                  setTab("lookbook-detail");
+                                }}
+                                className="block w-full text-left"
+                              >
+                                <div className="relative aspect-[3/4] w-full overflow-hidden rounded-t-[28px] bg-neutral-100">
+                                  <img src={lookbook.image} alt={lookbook.title} className="h-full w-full object-contain" />
+                                </div>
+                              </button>
+                              <div className="absolute right-3 top-3 z-10">
+                                <FavoriteHeartButton
+                                  isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                                  onToggle={() => toggleFavoriteLookbook(lookbook.id)}
+                                />
+                              </div>
+                            </div>
+                            <CardContent className="space-y-3 p-4">
+                              <div>
+                                <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-600">{lookbook.tag}</span>
+                                <h3 className="mt-3 text-lg font-black leading-tight">{lookbook.title}</h3>
+                              </div>
+                              <Button
+                                onClick={() => openOutfitBuilder(lookbook)}
+                                disabled={relatedProducts.length === 0}
+                                className="h-11 w-full rounded-2xl bg-neutral-900 text-sm disabled:bg-neutral-300"
+                              >
+                                🛍 整套買
+                              </Button>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
             </motion.div>
           )}
 
@@ -2407,6 +3242,127 @@ export default function JGoAppPrototype() {
               <h2 className="text-2xl font-black">商品管理</h2>
 
               <Card className="rounded-3xl border-neutral-100 shadow-sm">
+                <CardContent className="space-y-4 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black tracking-widest text-neutral-400">PRELAUNCH</p>
+                      <h3 className="text-lg font-black">上線前檢查</h3>
+                    </div>
+                    <Button
+                      onClick={runPrelaunchChecklist}
+                      className="rounded-2xl bg-neutral-900 text-xs"
+                    >
+                      {prelaunchLoading ? "檢查中..." : "執行檢查"}
+                    </Button>
+                  </div>
+
+                  {prelaunchChecks.length > 0 ? (
+                    <>
+                      <p className={`text-sm font-bold ${summarizePrelaunchChecks(prelaunchChecks).ready ? "text-green-700" : "text-amber-700"}`}>
+                        {summarizePrelaunchChecks(prelaunchChecks).passed}/{summarizePrelaunchChecks(prelaunchChecks).total} 項通過
+                        {summarizePrelaunchChecks(prelaunchChecks).ready ? "，可上線" : "，仍有項目需確認"}
+                      </p>
+                      <div className="space-y-2">
+                        {prelaunchChecks.map((check) => (
+                          <div key={check.id} className="flex items-start justify-between gap-3 rounded-2xl bg-neutral-50 p-3">
+                            <div>
+                              <p className="font-bold text-neutral-900">{check.label}</p>
+                              <p className="mt-1 text-xs text-neutral-500">{check.detail}</p>
+                            </div>
+                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${check.passed ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                              {check.passed ? "PASS" : "FAIL"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-neutral-500">按「執行檢查」確認商品 API、Lookbook、localStorage 與信任感區塊設定。</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-neutral-100 shadow-sm">
+                <CardContent className="space-y-4 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black tracking-widest text-neutral-400">ADMIN RANKING</p>
+                      <h3 className="text-lg font-black">排行榜</h3>
+                    </div>
+                    <Button
+                      onClick={() => {
+                        loadSalesRankings();
+                        loadLookbooks();
+                        refreshProductsFromXano({ useCache: false });
+                      }}
+                      className="rounded-2xl bg-neutral-900 text-xs"
+                    >
+                      刷新排行
+                    </Button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <h4 className="mb-2 font-black">商品銷售排行</h4>
+                      {topSalesProducts.length === 0 ? (
+                        <p className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-500">目前沒有銷售排行資料</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {topSalesProducts.map((product) => (
+                            <div key={`admin-sales-${product.id}`} className="flex items-center justify-between rounded-2xl bg-neutral-50 p-3">
+                              <div>
+                                <p className="font-black">#{product.rank} {product.name}</p>
+                                <p className="text-xs text-neutral-500">JGO-{product.id}</p>
+                              </div>
+                              <p className="text-sm font-black text-neutral-700">已售出 {product.soldCount} 件</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <h4 className="mb-2 font-black">商品收藏排行</h4>
+                      {topFavoriteProducts.length === 0 ? (
+                        <p className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-500">目前沒有收藏排行資料</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {topFavoriteProducts.map((product) => (
+                            <div key={`admin-product-fav-${product.id}`} className="flex items-center justify-between rounded-2xl bg-neutral-50 p-3">
+                              <div>
+                                <p className="font-black">#{product.rank} {product.name}</p>
+                                <p className="text-xs text-neutral-500">{product.brand}</p>
+                              </div>
+                              <p className="text-sm font-black text-neutral-700">收藏 {product.favoriteCount || 0} 次</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <h4 className="mb-2 font-black">穿搭收藏排行</h4>
+                      {topFavoriteLookbooks.length === 0 ? (
+                        <p className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-500">目前沒有穿搭收藏排行資料</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {topFavoriteLookbooks.map((lookbook) => (
+                            <div key={`admin-lookbook-fav-${lookbook.id}`} className="flex items-center justify-between rounded-2xl bg-neutral-50 p-3">
+                              <div>
+                                <p className="font-black">#{lookbook.rank} {lookbook.title}</p>
+                                <p className="text-xs text-neutral-500">{lookbook.tag}</p>
+                              </div>
+                              <p className="text-sm font-black text-neutral-700">收藏 {lookbook.favoriteCount || 0} 次</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-neutral-100 shadow-sm">
                 <CardContent className="space-y-3 p-4">
                   <h3 className="font-black">{editingLookbookId ? "編輯 AI LOOKBOOK" : "新增 AI LOOKBOOK"}</h3>
                   <Input
@@ -2557,30 +3513,44 @@ export default function JGoAppPrototype() {
 
                           <div className="mt-4 rounded-2xl bg-neutral-50 p-3">
                             <p className="mb-3 text-sm font-black">物流資訊</p>
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-2">
                               <input
                                 value={trackingForms[order.id]?.shippingCompany ?? order.shippingCompany ?? ""}
                                 onChange={(e) => updateTrackingForm(order.id, "shippingCompany", e.target.value)}
-                                placeholder="物流公司，例如 7-11"
-                                className="h-11 rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
+                                placeholder="物流公司，例如 7-ELEVEN"
+                                className="h-11 w-full rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
                               />
                               <input
                                 value={trackingForms[order.id]?.trackingNo ?? order.trackingNo ?? ""}
                                 onChange={(e) => updateTrackingForm(order.id, "trackingNo", e.target.value)}
                                 placeholder="物流單號"
-                                className="h-11 rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
+                                className="h-11 w-full rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
                               />
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-bold text-neutral-500">出貨時間</span>
+                                <input
+                                  type="datetime-local"
+                                  value={
+                                    trackingForms[order.id]?.shippedAt
+                                    ?? toDatetimeLocalValue(order.shippedAt)
+                                    ?? toDatetimeLocalValue(Date.now())
+                                  }
+                                  onChange={(e) => updateTrackingForm(order.id, "shippedAt", e.target.value)}
+                                  className="h-11 w-full rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
+                                />
+                              </label>
                             </div>
-                            {(order.shippingCompany || order.trackingNo) && (
+                            {(order.shippingCompany || order.trackingNo || order.shippedAt) && (
                               <p className="mt-2 text-xs font-bold text-neutral-500">
-                                目前：{order.shippingCompany || "未填物流公司"} {order.trackingNo || "未填單號"}
+                                目前：{order.shippingCompany || "未填物流公司"} / {order.trackingNo || "未填單號"}
+                                {order.shippedAt ? ` / ${formatShippedAt(order.shippedAt)}` : ""}
                               </p>
                             )}
                             <Button
-                              onClick={() => updateOrderTracking(order)}
+                              onClick={() => saveOrderShipping(order)}
                               className="mt-3 h-11 w-full rounded-2xl bg-neutral-900 text-sm"
                             >
-                              更新物流並設為已出貨
+                              儲存出貨資訊
                             </Button>
                           </div>
 
@@ -2639,9 +3609,9 @@ export default function JGoAppPrototype() {
                         value={productForm.gender}
                         onChange={(e) => setProductForm({ ...productForm, gender: e.target.value })}
                       >
-                        <option value="male">男性</option>
-                        <option value="female">女性</option>
-                        <option value="unisex">中性</option>
+                        <option value="male">男生 male</option>
+                        <option value="female">女生 female</option>
+                        <option value="unisex">中性 unisex</option>
                       </select>
                     </label>
                     <Input label="Tag" placeholder="日本選品" value={productForm.tag} onChange={(value) => setProductForm({ ...productForm, tag: value })} />
@@ -2668,16 +3638,49 @@ export default function JGoAppPrototype() {
                     </div>
                     <TextArea label="尺寸表" placeholder={"尺寸,長度,肩寬,胸圍,袖長\nS,74,53.5,124,29\nM,76,55,128,30\nL,78,56.5,132,31"} value={productForm.size_chart} onChange={(value) => setProductForm({ ...productForm, size_chart: value })} />
                   </div>
+                  {editingProductId ? (
+                    <div className="rounded-3xl border border-neutral-200 p-4">
+                      <SizeTableEditor
+                        key={editingProductId}
+                        productId={editingProductId}
+                        initialRows={
+                          products.find((item) => item.id === editingProductId)?.sizeTableJson || []
+                        }
+                        onSaved={(rows) => {
+                          setProducts((prev) =>
+                            prev.map((item) =>
+                              item.id === editingProductId ? { ...item, sizeTableJson: rows } : item
+                            )
+                          );
+                        }}
+                      />
+                    </div>
+                  ) : null}
                   <div className="grid grid-cols-2 gap-2">
                     <Button onClick={createProduct} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
                       {editingProductId ? "更新商品" : "新增商品"}
                     </Button>
-                    {editingProductId && (
+                    {editingProductId ? (
                       <Button onClick={resetProductForm} className="h-12 w-full rounded-2xl bg-neutral-200 text-neutral-900 text-base">
                         取消編輯
                       </Button>
+                    ) : (
+                      <div />
                     )}
                   </div>
+                  {editingProductId && (
+                    <Button
+                      onClick={() => {
+                        const product = products.find((item) => item.id === editingProductId);
+                        if (product) {
+                          handleSyncStock(product);
+                        }
+                      }}
+                      className="h-12 w-full rounded-2xl bg-blue-600 text-base text-white"
+                    >
+                      同步庫存
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
 
@@ -2707,6 +3710,11 @@ export default function JGoAppPrototype() {
                           <p className="font-black">{product.name}</p>
                           <p className="text-sm text-neutral-500">{product.brand}</p>
                           <p className="text-sm font-bold">{formatPrice(product.price)}</p>
+                          <div className="mt-2 space-y-0.5 text-xs text-neutral-500">
+                            <p>J-GO ID：{product.id}</p>
+                            <p>來源：{product.source_site || "unknown"}</p>
+                            <p>來源商品ID：{product.source_product_id || "-"}</p>
+                          </div>
                         </div>
                       </div>
 
@@ -2722,9 +3730,12 @@ export default function JGoAppPrototype() {
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         <Button onClick={() => startEditProduct(product)} className="h-10 rounded-2xl bg-neutral-900 text-sm">
                           編輯
+                        </Button>
+                        <Button onClick={() => handleSyncStock(product)} className="h-10 rounded-2xl bg-blue-600 text-sm text-white">
+                          同步庫存
                         </Button>
                         <Button onClick={() => deleteProduct(product.id)} className="h-10 rounded-2xl bg-red-100 text-sm text-red-600">
                           刪除
@@ -2796,11 +3807,11 @@ export default function JGoAppPrototype() {
                         <p className="font-black">{order.id}</p>
                         <p className="text-xs text-neutral-500">{order.createdAt}</p>
                       </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${order.status === "Paid" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>{order.status}</span>
-                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${order.shippingStatus === "已出貨" ? "bg-blue-100 text-blue-700" : "bg-neutral-100 text-neutral-600"}`}>{order.shippingStatus}</span>
-                      </div>
+                      <div className="text-right font-black">{formatPrice(order.total)}</div>
                     </div>
+
+                    <OrderStatusSummary order={order} />
+
                     <div className="flex items-center gap-2 text-sm text-neutral-600"><Package size={16} /> {order.items.length} 件商品</div>
                     {order.items.length > 0 && (
                       <div className="space-y-2 rounded-2xl bg-neutral-50 p-3">
@@ -2824,7 +3835,6 @@ export default function JGoAppPrototype() {
                         <p className="pl-6 text-xs text-neutral-500">{order.shippingAddress.city}{order.shippingAddress.district}{order.shippingAddress.address}</p>
                       )}
                     </div>
-                    <div className="border-t pt-3 text-right font-black">{formatPrice(order.total)}</div>
                   </CardContent>
                 </Card>
                 </button>
@@ -2844,15 +3854,9 @@ export default function JGoAppPrototype() {
                       <h2 className="text-2xl font-black">#{selectedOrder.id}</h2>
                       <p className="mt-1 text-xs text-neutral-500">{selectedOrder.createdAt}</p>
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${selectedOrder.status === "Paid" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>
-                        {selectedOrder.status}
-                      </span>
-                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${selectedOrder.shippingStatus === "已出貨" ? "bg-blue-100 text-blue-700" : "bg-neutral-100 text-neutral-600"}`}>
-                        {selectedOrder.shippingStatus}
-                      </span>
-                    </div>
                   </div>
+
+                  <OrderStatusSummary order={selectedOrder} detailed />
 
                   <div className="rounded-3xl bg-neutral-50 p-4">
                     <h3 className="mb-3 font-black">商品明細</h3>
@@ -2872,12 +3876,16 @@ export default function JGoAppPrototype() {
                     </div>
                   </div>
 
-                  <div className="rounded-3xl bg-neutral-50 p-4">
-                    <h3 className="mb-3 font-black">出貨狀態</h3>
-                    <p className="text-sm font-bold text-neutral-700">{selectedOrder.shippingStatus}</p>
-                    {selectedOrder.shippingCompany && <p className="mt-1 text-sm text-neutral-500">物流公司：{selectedOrder.shippingCompany}</p>}
-                    {selectedOrder.trackingNo && <p className="mt-1 text-sm text-neutral-500">追蹤碼：{selectedOrder.trackingNo}</p>}
+                  {selectedOrder.trackingNo ? (
+                    <div className="rounded-3xl bg-neutral-50 p-4">
+                      <h3 className="mb-3 font-black">物流資訊</h3>
+                      <p className="text-sm text-neutral-600">物流公司：{selectedOrder.shippingCompany || "-"}</p>
+                      <p className="mt-1 text-sm text-neutral-600">物流單號：{selectedOrder.trackingNo}</p>
+                      {selectedOrder.shippedAt ? (
+                        <p className="mt-1 text-sm text-neutral-600">出貨時間：{formatShippedAt(selectedOrder.shippedAt)}</p>
+                      ) : null}
                     </div>
+                  ) : null}
 
                   <div className="rounded-3xl bg-neutral-50 p-4">
                     <h3 className="mb-3 font-black">配送資訊</h3>
@@ -2906,10 +3914,11 @@ export default function JGoAppPrototype() {
           )}
         </main>
 
-        <nav className="sticky bottom-0 grid grid-cols-5 border-t bg-white px-2 py-2">
+        <nav className="sticky bottom-0 grid grid-cols-6 border-t bg-white px-1 py-2">
           <NavButton active={tab === "home"} icon={<Home size={20} />} label="首頁" onClick={() => setTab("home")} />
           <NavButton active={tab === "lookbook" || tab === "lookbook-detail" || tab === "outfit-builder"} icon={<Sparkles size={20} />} label="穿搭" onClick={() => setTab("lookbook")} />
           <NavButton active={tab === "shop"} icon={<Search size={20} />} label="商品" onClick={() => setTab("shop")} />
+          <NavButton active={tab === "favorites"} icon={<Heart size={20} />} label="收藏" onClick={() => setTab("favorites")} />
           <NavButton active={tab === "cart"} icon={<ShoppingBag size={20} />} label="購物車" onClick={() => setTab("cart")} />
           <NavButton
             active={tab === "orders"}
@@ -2925,50 +3934,311 @@ export default function JGoAppPrototype() {
   );
 }
 
-function ProductCard({ product, onClick }) {
+function OrderStatusSummary({ order, detailed = false }) {
+  const paymentLabel = formatPaymentStatus(order.status);
+  const shippingLabel = formatShippingStatus(order.shippingStatus, order.status);
+  const trackingLabel = formatTrackingNo(order.trackingNo);
+
   return (
-    <button onClick={onClick} className="text-left">
-      <Card className="overflow-hidden rounded-3xl border-neutral-100 shadow-sm transition hover:shadow-md">
-        <img src={product.image} alt={product.name} className="h-40 w-full object-cover" />
-        <CardContent className="p-3">
-          <span className="rounded-full bg-neutral-100 px-2 py-1 text-[11px] font-bold text-neutral-600">{product.tag}</span>
-          <h3 className="mt-2 line-clamp-2 font-bold leading-tight">{product.name}</h3>
-          <p className="mt-1 text-sm font-black">{formatPrice(product.price)}</p>
-        </CardContent>
-      </Card>
+    <div className={`rounded-2xl bg-neutral-50 ${detailed ? "p-4" : "p-3"}`}>
+      {detailed ? <h3 className="mb-3 font-black">訂單狀態</h3> : null}
+      <div className="space-y-2 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-bold text-neutral-500">付款狀態</span>
+          <span className={`rounded-full px-3 py-1 text-xs font-black ${getPaymentStatusClass(order.status)}`}>
+            {paymentLabel}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-bold text-neutral-500">出貨狀態</span>
+          <span className={`rounded-full px-3 py-1 text-xs font-black ${getShippingStatusClass(shippingLabel)}`}>
+            {shippingLabel}
+          </span>
+        </div>
+        <div className="flex items-start justify-between gap-3">
+          <span className="font-bold text-neutral-500">物流單號</span>
+          <span className={`text-right font-black ${order.trackingNo ? "text-neutral-900" : "text-neutral-400"}`}>
+            {trackingLabel}
+          </span>
+        </div>
+        {detailed && order.trackingNo && order.shippingCompany ? (
+          <div className="flex items-start justify-between gap-3">
+            <span className="font-bold text-neutral-500">物流公司</span>
+            <span className="text-right font-black text-neutral-900">{order.shippingCompany}</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function FavoriteHeartButton({ isFavorite, onToggle, className = "h-9 w-9" }) {
+  return (
+    <button
+      type="button"
+      aria-label={isFavorite ? "取消收藏" : "加入收藏"}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle?.();
+      }}
+      className={`flex items-center justify-center rounded-full bg-white/90 text-neutral-700 shadow-sm ring-1 ring-neutral-100 ${className}`}
+    >
+      <Heart
+        size={18}
+        className={isFavorite ? "fill-red-500 text-red-500" : "text-neutral-700"}
+      />
     </button>
   );
 }
 
-function OptionGroup({ title, options, value, setValue, disabledOptions = [], stockMap = {} }) {
+function ProductCard({ product, onClick, isFavorite = false, onToggleFavorite }) {
+  return (
+    <div className="relative">
+      <button type="button" onClick={onClick} className="w-full text-left">
+        <Card className="overflow-hidden rounded-3xl border-neutral-100 shadow-sm transition hover:shadow-md">
+          <div className="relative">
+            <img src={product.image} alt={product.name} className="h-40 w-full object-cover" />
+          </div>
+          <CardContent className="p-3">
+            <span className="rounded-full bg-neutral-100 px-2 py-1 text-[11px] font-bold text-neutral-600">{product.tag}</span>
+            <h3 className="mt-2 line-clamp-2 font-bold leading-tight">{product.name}</h3>
+            <p className="mt-1 text-sm font-black">{formatPrice(product.price)}</p>
+          </CardContent>
+        </Card>
+      </button>
+      {onToggleFavorite ? (
+        <div className="absolute right-3 top-3 z-10">
+          <FavoriteHeartButton
+            isFavorite={isFavorite}
+            onToggle={() => onToggleFavorite(product.id)}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RankingProductCard({
+  product,
+  rank,
+  metricLabel,
+  onClick,
+  isFavorite = false,
+  onToggleFavorite,
+  compact = false,
+}) {
+  const rankBadgeClass = rank <= 3 ? "bg-neutral-900 text-white" : "bg-white/90 text-neutral-700";
+
+  return (
+    <div className={`relative shrink-0 ${compact ? "w-[150px]" : "w-full"}`}>
+      <button type="button" onClick={onClick} className="w-full text-left">
+        <Card className="overflow-hidden rounded-3xl border-neutral-100 shadow-sm transition hover:shadow-md">
+          <div className="relative">
+            <img src={product.image} alt={product.name} className={`w-full object-cover ${compact ? "h-36" : "h-40"}`} />
+            <span className={`absolute left-3 top-3 rounded-full px-2.5 py-1 text-[11px] font-black ${rankBadgeClass}`}>
+              #{rank}
+            </span>
+          </div>
+          <CardContent className="p-3">
+            <span className="rounded-full bg-neutral-100 px-2 py-1 text-[10px] font-bold text-neutral-600">{product.tag}</span>
+            <h3 className="mt-2 line-clamp-2 text-sm font-bold leading-tight">{product.name}</h3>
+            <p className="mt-1 text-sm font-black">{formatPrice(product.price)}</p>
+            {metricLabel ? (
+              <p className="mt-2 text-[11px] font-bold text-neutral-500">{metricLabel}</p>
+            ) : null}
+          </CardContent>
+        </Card>
+      </button>
+      {onToggleFavorite ? (
+        <div className="absolute right-3 top-3 z-10">
+          <FavoriteHeartButton
+            isFavorite={isFavorite}
+            onToggle={() => onToggleFavorite(product.id)}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RankingLookbookCard({
+  lookbook,
+  rank,
+  metricLabel,
+  onClick,
+  isFavorite = false,
+  onToggleFavorite,
+}) {
+  const rankBadgeClass = rank <= 3 ? "bg-neutral-900 text-white" : "bg-white/90 text-neutral-700";
+
+  return (
+    <div className="relative w-[150px] shrink-0">
+      <button type="button" onClick={onClick} className="w-full text-left">
+        <Card className="overflow-hidden rounded-3xl border-neutral-100 shadow-sm transition hover:shadow-md">
+          <div className="relative aspect-[3/4] bg-neutral-100">
+            <img src={lookbook.image} alt={lookbook.title} className="h-full w-full object-cover" />
+            <span className={`absolute left-3 top-3 rounded-full px-2.5 py-1 text-[11px] font-black ${rankBadgeClass}`}>
+              #{rank}
+            </span>
+          </div>
+          <CardContent className="space-y-2 p-3">
+            <span className="rounded-full bg-neutral-100 px-2 py-1 text-[10px] font-bold text-neutral-600">{lookbook.tag}</span>
+            <h3 className="line-clamp-2 text-sm font-black leading-tight">{lookbook.title}</h3>
+            {metricLabel ? (
+              <p className="text-[11px] font-bold text-neutral-500">{metricLabel}</p>
+            ) : null}
+          </CardContent>
+        </Card>
+      </button>
+      {onToggleFavorite ? (
+        <div className="absolute right-3 top-3 z-10">
+          <FavoriteHeartButton
+            isFavorite={isFavorite}
+            onToggle={() => onToggleFavorite(lookbook.id)}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ProductAccordion({ sections }) {
+  const [openKeys, setOpenKeys] = useState(new Set());
+
+  const toggleSection = (key) => {
+    setOpenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const visibleSections = sections.filter((section) => {
+    if (!section.content) return false;
+    if (typeof section.content === "string") return section.content.trim().length > 0;
+    return true;
+  });
+
+  if (visibleSections.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {visibleSections.map((section) => {
+        const isOpen = openKeys.has(section.key);
+
+        return (
+          <div key={section.key} className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+            <button
+              type="button"
+              onClick={() => toggleSection(section.key)}
+              className="flex w-full items-center justify-between px-4 py-3 text-left"
+            >
+              <span className="text-sm font-black text-neutral-900">{section.title}</span>
+              <ChevronDown
+                size={18}
+                className={`text-neutral-400 transition ${isOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {isOpen ? <div className="border-t border-neutral-100 px-4 py-4">{section.content}</div> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function OptionGroup({ title, options, value, setValue, disabledOptions = [], stockMap = {}, statusMap = {} }) {
   return (
     <section>
       <h3 className="mb-3 font-bold">{title}</h3>
       <div className="flex flex-wrap gap-2">
         {options.map((option) => {
-          const isDisabled = disabledOptions.includes(option);
+          const status = statusMap[option] || "unknown";
+          const isSoldOut = status === "out_of_stock" || disabledOptions.includes(option);
+          const isDisabled = isSoldOut;
           const stock = stockMap[option];
+          const stockLabel = getStockDisplayLabel(status, stock);
 
           return (
             <button
               key={option}
+              type="button"
               disabled={isDisabled}
               onClick={() => !isDisabled && setValue(option)}
-              className={`rounded-2xl border px-4 py-2 text-sm font-bold ${
+              className={`min-w-[72px] rounded-2xl border px-4 py-2 text-sm font-bold ${
                 isDisabled
-                  ? "cursor-not-allowed border-neutral-100 bg-neutral-100 text-neutral-300 line-through"
+                  ? "cursor-not-allowed border-neutral-100 bg-neutral-100 text-neutral-400"
                   : value === option
                     ? "border-neutral-900 bg-neutral-900 text-white"
                     : "border-neutral-200 bg-white text-neutral-700"
               }`}
             >
-              {option}
-              {typeof stock === "number" && stock > 0 && stock <= 3 && <span className="ml-1 text-[10px]">剩{stock}</span>}
+              <span>{option}</span>
+              {stockLabel ? (
+                <span className={`mt-0.5 block text-[10px] font-bold ${
+                  stockLabel === "已售完"
+                    ? "text-neutral-400"
+                    : stockLabel === "剩少量"
+                      ? value === option ? "text-red-200" : "text-red-500"
+                      : value === option ? "text-neutral-300" : "text-green-600"
+                }`}>
+                  {stockLabel}
+                </span>
+              ) : null}
             </button>
           );
         })}
       </div>
     </section>
+  );
+}
+
+function SizeTableJsonTable({ rows }) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return null;
+  }
+
+  const columns = getSizeTableColumns(rows);
+
+  return (
+    <div>
+      <p className="mb-2 text-sm font-black">尺寸表</p>
+      <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[420px] border-collapse text-center text-sm">
+            <thead className="bg-neutral-100 text-neutral-700">
+              <tr>
+                {columns.map((field) => (
+                  <th key={field} className="border-b border-neutral-200 px-3 py-3 font-black">
+                    {SIZE_TABLE_FIELD_LABELS[field]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={`${row.size}-${rowIndex}`} className="odd:bg-white even:bg-neutral-50">
+                  {columns.map((field) => (
+                    <td
+                      key={`${row.size}-${field}`}
+                      className={`border-b border-neutral-100 px-3 py-3 ${field === "size" ? "font-black text-neutral-900" : "text-neutral-600"}`}
+                    >
+                      {row[field] || "-"}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-neutral-400">尺寸單位：cm。人工測量可能有 1–3cm 誤差。</p>
+    </div>
   );
 }
 

@@ -1,3 +1,7 @@
+import type { SourceSite } from "@/lib/products/source-site";
+import type { ProductGender } from "@/lib/products/product-gender";
+import type { ZozoSizeTableRow } from "@/lib/products/size-table-json";
+
 export type ZozoProductData = {
   name_jp: string;
   brand: string;
@@ -19,6 +23,11 @@ export type ImportedProduct = ZozoProductData &
   OpenAIProductEnhancement & {
     id: number;
     status: string;
+    gender?: ProductGender;
+    source_url?: string;
+    source_site?: SourceSite;
+    source_product_id?: string;
+    check_status?: string;
   };
 
 export type DraftProduct = {
@@ -33,4 +42,11 @@ export type DraftProduct = {
   images: string[];
   tags: string[];
   status: string;
+  gender: ProductGender;
+  source_url: string;
+  source_site: SourceSite;
+  source_product_id: string;
+  sourceUrl?: string;
+  url?: string;
+  size_table_json?: ZozoSizeTableRow[];
 };

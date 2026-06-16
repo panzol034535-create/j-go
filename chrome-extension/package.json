@@ -1,0 +1,14 @@
+{
+  "name": "j-go-chrome-extension",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.306",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.2"
+  }
+}

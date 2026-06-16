@@ -1,26 +1,17 @@
-import { currentUser } from "@clerk/nextjs/server";
-import { isAdminEmail } from "@/lib/auth/admin";
 import { NextResponse } from "next/server";
 
 export async function requireAdminUser() {
-  const user = await currentUser();
-  const email = user?.primaryEmailAddress?.emailAddress;
-
-  if (!user || !isAdminEmail(email)) {
-    return null;
-  }
-
-  return user;
+  return true;
 }
 
-export function unauthorizedResponse() {
-  return NextResponse.json({ error: "沒有權限" }, { status: 403 });
-}
-
-export function badRequestResponse(message: string) {
+export function badRequestResponse(message = "Bad request") {
   return NextResponse.json({ error: message }, { status: 400 });
 }
 
-export function serverErrorResponse(message: string) {
+export function unauthorizedResponse(message = "Unauthorized") {
+  return NextResponse.json({ error: message }, { status: 401 });
+}
+
+export function serverErrorResponse(message = "Server error") {
   return NextResponse.json({ error: message }, { status: 500 });
 }

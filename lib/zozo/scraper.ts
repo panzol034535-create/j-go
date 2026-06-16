@@ -1,3 +1,4 @@
+import { chromium } from "playwright";
 import type { ZozoProductData } from "@/lib/types/product-import";
 
 const ZOZO_HOST_PATTERN = /^(?:https?:\/\/)?(?:www\.)?zozo\.jp/i;
@@ -142,7 +143,7 @@ function extractImages(html: string, jsonLd: Record<string, unknown> | null): st
 
   return Array.from(images).slice(0, 12);
 }
-
+console.log("NEW EXTRACT COLORS RUNNING");
 function extractColors(html: string): string[] {
   const colors = new Set<string>();
 
@@ -168,7 +169,7 @@ function extractColors(html: string): string[] {
 
   return Array.from(colors);
 }
-
+console.log("NEW EXTRACT SIZES RUNNING");
 function extractSizes(html: string): string[] {
   const sizes = new Set<string>();
 
@@ -239,22 +240,52 @@ function extractName(html: string, jsonLd: Record<string, unknown> | null): stri
   return "";
 }
 
-export async function fetchZozoProduct(url: string): Promise<ZozoProductData> {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml",
-      "Accept-Language": "ja-JP,ja;q=0.9,en;q=0.8",
-    },
-    cache: "no-store",
+async function fetchZozoHtml(url: string): Promise<string> {
+  const browser = await chromium.launch({
+    headless: false,
   });
 
-  if (!response.ok) {
-    throw new Error(`無法抓取 ZOZO 商品頁（HTTP ${response.status}）`);
-  }
+  try {
+    const context = await browser.newContext({
+      locale: "ja-JP",
+      timezoneId: "Asia/Tokyo",
+      viewport: {
+        width: 1280,
+        height: 800,
+      },
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+    });
 
-  const html = await response.text();
+    const page = await context.newPage();
+
+    await page.goto(url, {
+      waitUntil: "commit",
+      timeout: 45000,
+    });
+
+    await page.waitForTimeout(10000);
+
+    console.log("URL =", page.url());
+    console.log("TITLE =", await page.title());
+
+    const html = await page.content();
+
+    console.log("HTML LENGTH =", html.length);
+
+    await page.screenshot({
+      path: "zozo-debug.png",
+      fullPage: true,
+    });
+
+    return html;
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function fetchZozoProduct(url: string): Promise<ZozoProductData> {
+  const html = await fetchZozoHtml(url);
   const jsonLd = parseJsonLd(html);
 
   const name_jp = extractName(html, jsonLd);
