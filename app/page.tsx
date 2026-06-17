@@ -44,10 +44,10 @@ import {
 } from "@/lib/orders/order-status";
 import { runPrelaunchChecks, summarizePrelaunchChecks } from "@/lib/prelaunch-check";
 import {
-  sortByFavoriteCount,
   syncLookbookFavoriteCount,
   syncProductFavoriteCount,
 } from "@/lib/rankings/favorite-ranking";
+import { parseRankingItems } from "@/lib/rankings/ranking-response";
 import { HOME_TRUST_CARDS, PRODUCT_TRUST_BADGES } from "@/lib/trust-signals";
 import {
   readLatestPurchaseFromStorage,
@@ -255,6 +255,12 @@ export default function JGoAppPrototype() {
   const [prelaunchChecks, setPrelaunchChecks] = useState([]);
   const [prelaunchLoading, setPrelaunchLoading] = useState(false);
   const [salesRankings, setSalesRankings] = useState([]);
+  const [favoriteProductRankings, setFavoriteProductRankings] = useState([]);
+  const [favoriteLookbookRankings, setFavoriteLookbookRankings] = useState([]);
+  const [isFavoriteProductsRankingLoading, setIsFavoriteProductsRankingLoading] = useState(true);
+  const [isFavoriteLookbooksRankingLoading, setIsFavoriteLookbooksRankingLoading] = useState(true);
+  const [favoriteProductsRankingError, setFavoriteProductsRankingError] = useState(false);
+  const [favoriteLookbooksRankingError, setFavoriteLookbooksRankingError] = useState(false);
   const checkoutTrackedRef = useRef(false);
   const [authMode, setAuthMode] = useState("login");
   const [currentUser, setCurrentUser] = useState(null);
@@ -574,6 +580,8 @@ export default function JGoAppPrototype() {
     refreshProductsFromXano({ useCache: true });
     loadLookbooks();
     loadSalesRankings();
+    loadFavoriteProductRankings();
+    loadFavoriteLookbookRankings();
   }, []);
 
   const loadLookbooks = async () => {
@@ -912,19 +920,59 @@ export default function JGoAppPrototype() {
   }, [salesRankings, products]);
 
   const topFavoriteProducts = useMemo(
-    () => sortByFavoriteCount(products, 10).map((product, index) => ({
-      ...product,
-      rank: index + 1,
-    })),
-    [products]
+    () => parseRankingItems(favoriteProductRankings)
+      .map((entry, index) => {
+        const item = entry && typeof entry === "object" ? entry : {};
+        const productId = Number(item.id ?? item.product_id);
+        const localProduct = products.find((product) => Number(product.id) === productId);
+
+        if (!localProduct && !item.name) {
+          return null;
+        }
+
+        return {
+          ...(localProduct || {
+            id: productId,
+            name: item.name || "",
+            brand: item.brand || "",
+            price: item.price || 0,
+            image: item.image || "",
+            tag: item.tag || "日本選品",
+          }),
+          rank: index + 1,
+          favoriteCount: Number(item.favorite_count ?? item.favoriteCount ?? localProduct?.favoriteCount ?? 0) || 0,
+        };
+      })
+      .filter(Boolean),
+    [favoriteProductRankings, products]
   );
 
   const topFavoriteLookbooks = useMemo(
-    () => sortByFavoriteCount(lookbooks, 10).map((lookbook, index) => ({
-      ...lookbook,
-      rank: index + 1,
-    })),
-    [lookbooks]
+    () => parseRankingItems(favoriteLookbookRankings)
+      .map((entry, index) => {
+        const item = entry && typeof entry === "object" ? entry : {};
+        const lookbookId = Number(item.id ?? item.lookbook_id);
+        const localLookbook = lookbooks.find((lookbook) => Number(lookbook.id) === lookbookId);
+
+        if (!localLookbook && !item.title) {
+          return null;
+        }
+
+        return {
+          ...(localLookbook || {
+            id: lookbookId,
+            title: item.title || "J-GO Lookbook",
+            image: item.image || "",
+            tag: item.tag || item.style_tag || "AI LOOKBOOK",
+            gender: item.gender || "unisex",
+            product_ids: Array.isArray(item.product_ids) ? item.product_ids : [],
+          }),
+          rank: index + 1,
+          favoriteCount: Number(item.favorite_count ?? item.favoriteCount ?? localLookbook?.favoriteCount ?? 0) || 0,
+        };
+      })
+      .filter(Boolean),
+    [favoriteLookbookRankings, lookbooks]
   );
 
   const toggleFavorite = (productId) => {
@@ -1000,17 +1048,68 @@ export default function JGoAppPrototype() {
 
     try {
       const response = await fetchWithTimeout("/api/rankings/sales?limit=10&period=week", {}, 15000);
-      if (!response.ok) {
-        throw new Error(`讀取銷售排行失敗：${response.status}`);
+      const data = await response.json();
+      const items = parseRankingItems(data.rankings ? { items: data.rankings } : data);
+
+      if (!response.ok || data.success === false) {
+        throw new Error(data.message || `讀取銷售排行失敗：${response.status}`);
       }
 
-      const data = await response.json();
-      setSalesRankings(Array.isArray(data.rankings) ? data.rankings : []);
+      setSalesRankings(items);
     } catch (error) {
       console.error("讀取銷售排行失敗", error);
       setRankingLoadError(true);
+      setSalesRankings([]);
     } finally {
       setIsRankingLoading(false);
+    }
+  };
+
+  const loadFavoriteProductRankings = async () => {
+    setIsFavoriteProductsRankingLoading(true);
+    setFavoriteProductsRankingError(false);
+
+    try {
+      const response = await fetchWithTimeout("/api/rankings/favorites?limit=10", {}, 15000);
+      const data = await response.json();
+      const items = parseRankingItems(data);
+
+      setFavoriteProductRankings(items);
+
+      if (!response.ok || data.success === false) {
+        setFavoriteProductsRankingError(true);
+        console.error("讀取商品收藏排行失敗", data.message || response.status);
+      }
+    } catch (error) {
+      console.error("讀取商品收藏排行失敗", error);
+      setFavoriteProductsRankingError(true);
+      setFavoriteProductRankings([]);
+    } finally {
+      setIsFavoriteProductsRankingLoading(false);
+    }
+  };
+
+  const loadFavoriteLookbookRankings = async () => {
+    setIsFavoriteLookbooksRankingLoading(true);
+    setFavoriteLookbooksRankingError(false);
+
+    try {
+      const response = await fetchWithTimeout("/api/rankings/lookbooks?limit=10", {}, 15000);
+      const data = await response.json();
+      const items = parseRankingItems(data);
+
+      setFavoriteLookbookRankings(items);
+
+      if (!response.ok || data.success === false) {
+        setFavoriteLookbooksRankingError(true);
+        console.error("讀取穿搭收藏排行失敗", data.message || response.status);
+      }
+    } catch (error) {
+      console.error("讀取穿搭收藏排行失敗", error);
+      setFavoriteLookbooksRankingError(true);
+      setFavoriteLookbookRankings([]);
+    } finally {
+      setIsFavoriteLookbooksRankingLoading(false);
     }
   };
 
@@ -2190,9 +2289,9 @@ export default function JGoAppPrototype() {
                   <h3 className="text-xl font-black tracking-tight">人氣收藏商品</h3>
                   <button onClick={() => setTab("shop")} className="text-xs font-black text-neutral-500">看全部 ›</button>
                 </div>
-                {isHomeDataLoading || homeDataLoadError ? (
+                {isFavoriteProductsRankingLoading || favoriteProductsRankingError ? (
                   <div className="space-y-3">
-                    {homeDataLoadError ? (
+                    {favoriteProductsRankingError ? (
                       <HomeLoadingHint message="資料載入中，請稍候" />
                     ) : null}
                     <HorizontalSkeletonCards count={3} className="h-[220px] w-[150px]" />
@@ -2224,9 +2323,9 @@ export default function JGoAppPrototype() {
                   <h3 className="text-xl font-black tracking-tight">人氣穿搭排行</h3>
                   <button onClick={() => setTab("lookbook")} className="text-xs font-black text-neutral-500">看全部 ›</button>
                 </div>
-                {isLookbookLoading || lookbooksLoadError ? (
+                {isFavoriteLookbooksRankingLoading || favoriteLookbooksRankingError ? (
                   <div className="space-y-3">
-                    {lookbooksLoadError ? (
+                    {favoriteLookbooksRankingError ? (
                       <HomeLoadingHint message="資料載入中，請稍候" />
                     ) : null}
                     <HorizontalSkeletonCards count={3} className="h-[220px] w-[150px]" />
@@ -2317,7 +2416,14 @@ export default function JGoAppPrototype() {
                 <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-xl font-black tracking-tight">人氣穿搭排行</h3>
                 </div>
-                {topFavoriteLookbooks.length === 0 ? (
+                {isFavoriteLookbooksRankingLoading || favoriteLookbooksRankingError ? (
+                  <div className="space-y-3">
+                    {favoriteLookbooksRankingError ? (
+                      <HomeLoadingHint message="資料載入中，請稍候" />
+                    ) : null}
+                    <HorizontalSkeletonCards count={3} className="h-[220px] w-[150px]" />
+                  </div>
+                ) : topFavoriteLookbooks.length === 0 ? (
                   <div className="rounded-3xl bg-neutral-50 p-6 text-center text-sm font-bold text-neutral-400">
                     目前還沒有穿搭收藏排行資料。
                   </div>
@@ -3348,6 +3454,8 @@ export default function JGoAppPrototype() {
                     <Button
                       onClick={() => {
                         loadSalesRankings();
+                        loadFavoriteProductRankings();
+                        loadFavoriteLookbookRankings();
                         loadLookbooks();
                         refreshProductsFromXano({ useCache: false });
                       }}
