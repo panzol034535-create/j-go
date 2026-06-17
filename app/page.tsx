@@ -32,6 +32,7 @@ import {
 import { SizeTableEditor } from "@/components/admin/SizeTableEditor";
 import { buildSizeRecommendation, normalizeSizeName } from "@/lib/products/size-recommendation";
 import { filterProductsBySearch } from "@/lib/products/product-search";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { isFavoriteProduct, loadFavoriteIds, saveFavoriteIds, toggleFavoriteId } from "@/lib/favorites";
 import { formatShippedAt, toDatetimeLocalValue, toIsoDateTime } from "@/lib/orders/shipping";
 import {
@@ -230,6 +231,12 @@ export default function JGoAppPrototype() {
   const [favoriteLookbookIds, setFavoriteLookbookIds] = useState([]);
   const [favoritesTab, setFavoritesTab] = useState("products");
   const [loadingProducts, setLoadingProducts] = useState(true);
+  const [isHomeDataLoading, setIsHomeDataLoading] = useState(true);
+  const [isLookbookLoading, setIsLookbookLoading] = useState(true);
+  const [isRankingLoading, setIsRankingLoading] = useState(true);
+  const [homeDataLoadError, setHomeDataLoadError] = useState(false);
+  const [lookbooksLoadError, setLookbooksLoadError] = useState(false);
+  const [rankingLoadError, setRankingLoadError] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
@@ -524,6 +531,8 @@ export default function JGoAppPrototype() {
 
   const refreshProductsFromXano = async ({ useCache = true } = {}) => {
     setLoadingProducts(true);
+    setIsHomeDataLoading(true);
+    setHomeDataLoadError(false);
 
     if (useCache) {
       const cachedProducts = localStorage.getItem("jgo_products_cache_v2");
@@ -532,15 +541,16 @@ export default function JGoAppPrototype() {
         if (Array.isArray(parsedProducts) && parsedProducts.length > 0) {
           applyProducts(parsedProducts);
           setLoadingProducts(false);
+          setIsHomeDataLoading(false);
         }
       }
     }
 
     try {
-      const response = await fetch(`/api/products?t=${Date.now()}`);
+      const response = await fetchWithTimeout(`/api/products?t=${Date.now()}`, {}, 15000);
 
       if (!response.ok) {
-        throw new Error("商品 API 載入失敗");
+        throw new Error(`商品 API 載入失敗：${response.status}`);
       }
 
       const data = await response.json();
@@ -553,28 +563,28 @@ export default function JGoAppPrototype() {
       }
     } catch (error) {
       console.error("讀取商品失敗", error);
+      setHomeDataLoadError(true);
     } finally {
       setLoadingProducts(false);
+      setIsHomeDataLoading(false);
     }
   };
 
   useEffect(() => {
     refreshProductsFromXano({ useCache: true });
     loadLookbooks();
+    loadSalesRankings();
   }, []);
 
-  useEffect(() => {
-    if (!mounted) {
-      return;
-    }
-
-    loadSalesRankings();
-  }, [mounted]);
-
   const loadLookbooks = async () => {
+    setIsLookbookLoading(true);
+    setLookbooksLoadError(false);
+
     try {
-      const response = await fetch(`${XANO_LOOKBOOKS_URL}?t=${Date.now()}`);
-      if (!response.ok) throw new Error(`讀取 Lookbook 失敗：${response.status}`);
+      const response = await fetchWithTimeout(`${XANO_LOOKBOOKS_URL}?t=${Date.now()}`, {}, 15000);
+      if (!response.ok) {
+        throw new Error(`讀取 Lookbook 失敗：${response.status}`);
+      }
 
       const data = await response.json();
       const list = Array.isArray(data) ? data : data?.items || [];
@@ -598,7 +608,10 @@ export default function JGoAppPrototype() {
         };
       }));
     } catch (error) {
-      console.error(error);
+      console.error("讀取 Lookbook 失敗", error);
+      setLookbooksLoadError(true);
+    } finally {
+      setIsLookbookLoading(false);
     }
   };
 
@@ -982,16 +995,22 @@ export default function JGoAppPrototype() {
   };
 
   const loadSalesRankings = async () => {
+    setIsRankingLoading(true);
+    setRankingLoadError(false);
+
     try {
-      const response = await fetch("/api/rankings/sales?limit=10&period=week");
+      const response = await fetchWithTimeout("/api/rankings/sales?limit=10&period=week", {}, 15000);
       if (!response.ok) {
-        return;
+        throw new Error(`讀取銷售排行失敗：${response.status}`);
       }
 
       const data = await response.json();
       setSalesRankings(Array.isArray(data.rankings) ? data.rankings : []);
     } catch (error) {
       console.error("讀取銷售排行失敗", error);
+      setRankingLoadError(true);
+    } finally {
+      setIsRankingLoading(false);
     }
   };
 
@@ -1916,11 +1935,6 @@ export default function JGoAppPrototype() {
 
         <main className="flex-1 overflow-y-auto px-5 py-5 pb-24">
           {tab === "home" && (
-            loadingProducts ? (
-              <div className="flex h-64 items-center justify-center text-neutral-400 font-bold">
-                商品載入中...
-              </div>
-            ) : (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
               <section className="space-y-4">
                 <button
@@ -1976,8 +1990,8 @@ export default function JGoAppPrototype() {
                 })}
               </section>
 
-              <section className="relative overflow-hidden rounded-[2rem] bg-neutral-900 shadow-2xl">
-                <div className="absolute inset-0 grid grid-cols-2">
+              <section className="relative h-[320px] overflow-hidden rounded-[2rem] bg-neutral-900 shadow-2xl">
+                <div className="absolute inset-0 grid grid-cols-2 bg-neutral-800">
                   {categoryMenImage && (
                     <img
                       src={categoryMenImage}
@@ -1997,7 +2011,7 @@ export default function JGoAppPrototype() {
                 <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/40 to-black/30" />
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.18),transparent_30%)]" />
 
-                <div className="relative z-10 min-h-[320px] px-6 py-5 text-white">
+                <div className="relative z-10 flex h-full flex-col px-6 py-5 text-white">
                   <div className="flex justify-end">
                     <span className="rounded-full bg-neutral-950/90 px-4 py-1.5 text-[10px] font-black text-white shadow-lg backdrop-blur">NEW DROP</span>
                   </div>
@@ -2023,7 +2037,18 @@ export default function JGoAppPrototype() {
                   <button onClick={() => setTab("lookbook")} className="text-xs font-black text-neutral-500">查看全部 ›</button>
                 </div>
 
-                {lookbooks.length > 0 ? (
+                {isLookbookLoading || lookbooksLoadError ? (
+                  <div className="space-y-3">
+                    {lookbooksLoadError ? (
+                      <HomeLoadingHint message="資料載入中，請稍候" />
+                    ) : null}
+                    <HorizontalSkeletonCards count={4} className="h-[188px] w-[150px]" />
+                  </div>
+                ) : lookbooks.length === 0 ? (
+                  <div className="rounded-[1.6rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-400">
+                    目前還沒有 Lookbook，新增後會自動出現在這裡。
+                  </div>
+                ) : (
                   <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
                     {lookbooks.slice(0, 4).map((lookbook, index) => (
                       <div key={lookbook.id} className="relative shrink-0">
@@ -2032,15 +2057,21 @@ export default function JGoAppPrototype() {
                             setSelectedLookbook(lookbook);
                             setTab("lookbook-detail");
                           }}
-                          className="group relative h-[218px] min-w-[150px] overflow-hidden rounded-[1.6rem] bg-neutral-100 text-left shadow-[0_14px_30px_rgba(0,0,0,0.1)] transition active:scale-[0.98]"
+                          className="group relative min-w-[150px] w-[150px] overflow-hidden rounded-[28px] bg-neutral-100 text-left shadow-[0_14px_30px_rgba(0,0,0,0.1)] transition active:scale-[0.98]"
                         >
-                          <img src={lookbook.image} alt={lookbook.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
-                          <span className="absolute left-3 top-3 rounded-full bg-neutral-950/90 px-2.5 py-1 text-[10px] font-black text-white">{String(index + 1).padStart(2, "0")}</span>
-                          <div className="absolute bottom-3 left-3 right-3 text-white">
-                            <p className="text-[15px] font-black leading-tight">{lookbook.tag || "STYLE"}</p>
-                            <p className="mt-1 line-clamp-2 text-[11px] font-bold leading-4 text-white/85">{lookbook.title}</p>
-                            <span className="mt-3 inline-block rounded-full bg-white/90 px-3 py-1.5 text-[10px] font-black text-neutral-900">查看整套</span>
+                          <div className="relative aspect-[4/5] w-full overflow-hidden bg-neutral-100">
+                            <img
+                              src={lookbook.image}
+                              alt={lookbook.title}
+                              className="h-full w-full object-contain object-center"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+                            <span className="absolute left-3 top-3 rounded-full bg-neutral-950/90 px-2.5 py-1 text-[10px] font-black text-white">{String(index + 1).padStart(2, "0")}</span>
+                            <div className="absolute bottom-3 left-3 right-3 text-white">
+                              <p className="text-[15px] font-black leading-tight">{lookbook.tag || "STYLE"}</p>
+                              <p className="mt-1 line-clamp-2 text-[11px] font-bold leading-4 text-white/85">{lookbook.title}</p>
+                              <span className="mt-3 inline-block rounded-full bg-white/90 px-3 py-1.5 text-[10px] font-black text-neutral-900">查看整套</span>
+                            </div>
                           </div>
                         </button>
                         <div className="absolute right-3 top-3 z-10">
@@ -2051,10 +2082,6 @@ export default function JGoAppPrototype() {
                         </div>
                       </div>
                     ))}
-                  </div>
-                ) : (
-                  <div className="rounded-[1.6rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-400">
-                    目前還沒有 Lookbook，新增後會自動出現在這裡。
                   </div>
                 )}
               </section>
@@ -2129,7 +2156,14 @@ export default function JGoAppPrototype() {
                   <h3 className="text-xl font-black tracking-tight">本週熱賣商品</h3>
                   <button onClick={() => setTab("shop")} className="text-xs font-black text-neutral-500">看全部 ›</button>
                 </div>
-                {topSalesProducts.length === 0 ? (
+                {isRankingLoading || rankingLoadError ? (
+                  <div className="space-y-3">
+                    {rankingLoadError ? (
+                      <HomeLoadingHint message="資料載入中，請稍候" />
+                    ) : null}
+                    <HorizontalSkeletonCards count={3} className="h-[220px] w-[150px]" />
+                  </div>
+                ) : topSalesProducts.length === 0 ? (
                   <div className="rounded-[1.6rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-400">
                     目前還沒有銷售排行資料。
                   </div>
@@ -2156,7 +2190,14 @@ export default function JGoAppPrototype() {
                   <h3 className="text-xl font-black tracking-tight">人氣收藏商品</h3>
                   <button onClick={() => setTab("shop")} className="text-xs font-black text-neutral-500">看全部 ›</button>
                 </div>
-                {topFavoriteProducts.length === 0 ? (
+                {isHomeDataLoading || homeDataLoadError ? (
+                  <div className="space-y-3">
+                    {homeDataLoadError ? (
+                      <HomeLoadingHint message="資料載入中，請稍候" />
+                    ) : null}
+                    <HorizontalSkeletonCards count={3} className="h-[220px] w-[150px]" />
+                  </div>
+                ) : topFavoriteProducts.length === 0 ? (
                   <div className="rounded-[1.6rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-400">
                     目前還沒有收藏排行資料。
                   </div>
@@ -2183,7 +2224,14 @@ export default function JGoAppPrototype() {
                   <h3 className="text-xl font-black tracking-tight">人氣穿搭排行</h3>
                   <button onClick={() => setTab("lookbook")} className="text-xs font-black text-neutral-500">看全部 ›</button>
                 </div>
-                {topFavoriteLookbooks.length === 0 ? (
+                {isLookbookLoading || lookbooksLoadError ? (
+                  <div className="space-y-3">
+                    {lookbooksLoadError ? (
+                      <HomeLoadingHint message="資料載入中，請稍候" />
+                    ) : null}
+                    <HorizontalSkeletonCards count={3} className="h-[220px] w-[150px]" />
+                  </div>
+                ) : topFavoriteLookbooks.length === 0 ? (
                   <div className="rounded-[1.6rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-400">
                     目前還沒有穿搭收藏排行資料。
                   </div>
@@ -2212,6 +2260,14 @@ export default function JGoAppPrototype() {
                   <h3 className="text-xl font-black tracking-tight">新品上架</h3>
                   <button onClick={() => setTab("shop")} className="text-xs font-black text-neutral-500">看全部 ›</button>
                 </div>
+                {isHomeDataLoading || homeDataLoadError ? (
+                  <div className="space-y-3">
+                    {homeDataLoadError ? (
+                      <HomeLoadingHint message="資料載入中，請稍候" />
+                    ) : null}
+                    <ProductGridSkeleton count={4} />
+                  </div>
+                ) : (
                 <div className="grid grid-cols-2 gap-3">
                   {catalogFilteredProducts
                     .slice(0, 4)
@@ -2225,9 +2281,9 @@ export default function JGoAppPrototype() {
                       />
                     ))}
                 </div>
+                )}
               </section>
             </motion.div>
-            )
           )}
 
           {tab === "lookbook" && (
@@ -3930,6 +3986,40 @@ export default function JGoAppPrototype() {
           />
         </nav>
       </div>
+    </div>
+  );
+}
+
+function HomeLoadingHint({ message = "資料載入中，請稍候" }) {
+  return <p className="text-sm font-bold text-neutral-400">{message}</p>;
+}
+
+function HorizontalSkeletonCards({ count = 4, className = "h-[188px] w-[150px]" }) {
+  return (
+    <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none]">
+      {Array.from({ length: count }).map((_, index) => (
+        <div
+          key={`skeleton-card-${index}`}
+          className={`shrink-0 animate-pulse rounded-[28px] bg-neutral-100 ${className}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ProductGridSkeleton({ count = 4 }) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={`product-skeleton-${index}`} className="overflow-hidden rounded-3xl bg-neutral-100">
+          <div className="h-40 animate-pulse bg-neutral-200" />
+          <div className="space-y-2 p-3">
+            <div className="h-3 w-16 animate-pulse rounded-full bg-neutral-200" />
+            <div className="h-4 w-full animate-pulse rounded bg-neutral-200" />
+            <div className="h-4 w-20 animate-pulse rounded bg-neutral-200" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
