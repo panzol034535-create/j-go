@@ -1,3 +1,4 @@
+export const PRODUCTS_CACHE_V2_KEY = "jgo_products_cache_v2";
 export const HOME_PRODUCTS_CACHE_KEY = "jgo_home_products_cache";
 export const HOME_LOOKBOOKS_CACHE_KEY = "jgo_home_lookbooks_cache";
 export const HOME_RANKINGS_CACHE_KEY = "jgo_home_rankings_cache";
@@ -31,6 +32,24 @@ function writeJson(key: string, value: unknown): void {
   }
 
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+export function hasValidProductsCacheV2(): boolean {
+  const cached = readProductsCacheV2();
+  return Array.isArray(cached) && cached.length > 0;
+}
+
+export function readProductsCacheV2<T = unknown>(): T[] | null {
+  const parsed = readJson<unknown>(PRODUCTS_CACHE_V2_KEY);
+  return Array.isArray(parsed) ? (parsed as T[]) : null;
+}
+
+export function saveProductsCacheV2(products: unknown[]): void {
+  if (!Array.isArray(products) || products.length === 0) {
+    return;
+  }
+
+  writeJson(PRODUCTS_CACHE_V2_KEY, products);
 }
 
 export function hasHomeProductsCache(): boolean {

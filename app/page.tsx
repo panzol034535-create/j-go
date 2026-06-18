@@ -70,14 +70,14 @@ import {
 } from "@/lib/lookbook-favorites";
 import {
   hasHomeLookbooksCache as readHasHomeLookbooksCache,
-  hasHomeProductsCache as readHasHomeProductsCache,
   hasHomeRankingsCache as readHasHomeRankingsCache,
   readHomeLookbooksCache,
   readHomeProductsCache,
   readHomeRankingsCache,
+  readProductsCacheV2,
   saveHomeLookbooksCache,
-  saveHomeProductsCache,
   saveHomeRankingsCache,
+  saveProductsCacheV2,
 } from "@/lib/home-cache";
 
 function Button({ children, onClick, className = "" }) {
@@ -252,7 +252,7 @@ function formatLookbookList(list) {
 export default function JGoAppPrototype() {
   const { user, isSignedIn } = useUser();
   const [tab, setTab] = useState("home");
-  const [products, setProducts] = useState(() => readHomeProductsCache() ?? []);
+  const [products, setProducts] = useState([]);
   const [lookbooks, setLookbooks] = useState(() => readHomeLookbooksCache() ?? []);
   const [selectedLookbook, setSelectedLookbook] = useState(null);
   const [outfitSelections, setOutfitSelections] = useState({});
@@ -262,11 +262,11 @@ export default function JGoAppPrototype() {
   const [favoriteIds, setFavoriteIds] = useState([]);
   const [favoriteLookbookIds, setFavoriteLookbookIds] = useState([]);
   const [favoritesTab, setFavoritesTab] = useState("products");
-  const [loadingProducts, setLoadingProducts] = useState(() => !readHasHomeProductsCache());
-  const [isHomeDataLoading, setIsHomeDataLoading] = useState(() => !readHasHomeProductsCache());
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [isHomeDataLoading, setIsHomeDataLoading] = useState(true);
   const [isLookbookLoading, setIsLookbookLoading] = useState(() => !readHasHomeLookbooksCache());
   const [isRankingLoading, setIsRankingLoading] = useState(() => !readHasHomeRankingsCache());
-  const [hasHomeProductsCache, setHasHomeProductsCache] = useState(() => readHasHomeProductsCache());
+  const [hasProductsCache, setHasProductsCache] = useState(false);
   const [hasHomeLookbooksCache, setHasHomeLookbooksCache] = useState(() => readHasHomeLookbooksCache());
   const [hasHomeRankingsCache, setHasHomeRankingsCache] = useState(() => readHasHomeRankingsCache());
   const [homeDataLoadError, setHomeDataLoadError] = useState(false);
@@ -578,7 +578,7 @@ export default function JGoAppPrototype() {
     setSelectedImageIndex(0);
   };
 
-  const refreshProductsFromXano = async ({ hasCache = hasHomeProductsCache } = {}) => {
+  const refreshProductsFromXano = async ({ hasCache = hasProductsCache } = {}) => {
     if (!hasCache) {
       setLoadingProducts(true);
       setIsHomeDataLoading(true);
@@ -596,13 +596,12 @@ export default function JGoAppPrototype() {
       const productList = Array.isArray(data.products) ? data.products : Array.isArray(data) ? data : [];
       const formattedProducts = formatXanoProducts(productList);
 
-      saveHomeProductsCache(formattedProducts);
-      setHasHomeProductsCache(true);
+      console.log("PRODUCT API COUNT", formattedProducts.length);
 
       if (formattedProducts.length > 0) {
+        saveProductsCacheV2(formattedProducts);
+        setHasProductsCache(true);
         applyProducts(formattedProducts);
-      } else {
-        setProducts([]);
       }
     } catch (error) {
       console.error("讀取商品失敗", error);
@@ -616,15 +615,34 @@ export default function JGoAppPrototype() {
   };
 
   useEffect(() => {
-    const productsCache = readHasHomeProductsCache();
-    if (productsCache) {
-      const cachedProducts = readHomeProductsCache();
+    let hasCache = false;
+
+    try {
+      const cachedProducts = readProductsCacheV2();
       if (Array.isArray(cachedProducts) && cachedProducts.length > 0) {
+        console.log("PRODUCT CACHE COUNT", cachedProducts.length);
         applyProducts(cachedProducts);
+        hasCache = true;
+        setHasProductsCache(true);
+        setLoadingProducts(false);
+        setIsHomeDataLoading(false);
+      } else {
+        const legacyHomeProducts = readHomeProductsCache();
+        if (Array.isArray(legacyHomeProducts) && legacyHomeProducts.length > 0) {
+          console.log("PRODUCT CACHE COUNT", legacyHomeProducts.length);
+          applyProducts(legacyHomeProducts);
+          saveProductsCacheV2(legacyHomeProducts);
+          hasCache = true;
+          setHasProductsCache(true);
+          setLoadingProducts(false);
+          setIsHomeDataLoading(false);
+        }
       }
+    } catch (error) {
+      console.error("讀取商品快取失敗", error);
     }
 
-    refreshProductsFromXano({ hasCache: productsCache });
+    refreshProductsFromXano({ hasCache });
     loadLookbooks({ hasCache: readHasHomeLookbooksCache() });
     loadHomeRankings({ hasCache: readHasHomeRankingsCache() });
   }, []);
@@ -2427,7 +2445,7 @@ export default function JGoAppPrototype() {
                   <h3 className="text-xl font-black tracking-tight">新品上架</h3>
                   <button onClick={() => setTab("shop")} className="text-xs font-black text-neutral-500">看全部 ›</button>
                 </div>
-                {isHomeDataLoading && !hasHomeProductsCache ? (
+                {isHomeDataLoading && !hasProductsCache ? (
                   <ProductGridSkeleton count={4} />
                 ) : catalogFilteredProducts.length > 0 ? (
                 <div className="grid grid-cols-2 gap-3">
@@ -2443,9 +2461,9 @@ export default function JGoAppPrototype() {
                       />
                     ))}
                 </div>
-                ) : homeDataLoadError && !hasHomeProductsCache ? (
+                ) : homeDataLoadError && !hasProductsCache ? (
                   <HomeLoadingHint message="資料載入中，請稍候" />
-                ) : !isHomeDataLoading && !homeDataLoadError ? (
+                ) : !isHomeDataLoading && !hasProductsCache && products.length === 0 ? (
                   <div className="rounded-[1.6rem] bg-neutral-50 p-5 text-sm font-bold text-neutral-400">
                     目前還沒有新品上架。
                   </div>
@@ -2811,7 +2829,14 @@ export default function JGoAppPrototype() {
                 )}
               </div>
 
-              {filteredProducts.length === 0 ? (
+              {loadingProducts && !hasProductsCache ? (
+                <ProductGridSkeleton count={4} />
+              ) : !loadingProducts && !hasProductsCache && products.length === 0 ? (
+                <div className="rounded-[2rem] bg-neutral-50 p-8 text-center">
+                  <h3 className="font-black">目前沒有商品</h3>
+                  <p className="mt-1 text-sm text-neutral-500">請稍後再試或重新整理頁面。</p>
+                </div>
+              ) : filteredProducts.length === 0 ? (
                 <div className="rounded-[2rem] bg-neutral-50 p-8 text-center">
                   <h3 className="font-black">目前沒有符合的商品</h3>
                   <p className="mt-1 text-sm text-neutral-500">可以切換性別、品牌分類或調整搜尋關鍵字。</p>
