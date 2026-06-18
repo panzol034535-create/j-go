@@ -46,12 +46,7 @@ import {
   bumpFavoriteProductRankings,
   bumpLookbookFavoriteCount,
   bumpProductFavoriteCount,
-  setFavoriteLookbookRankingCount,
-  setFavoriteProductRankingCount,
-  setLookbookFavoriteCount,
-  setProductFavoriteCount,
-  syncLookbookFavoriteCount,
-  syncProductFavoriteCount,
+  FRONTEND_FAVORITE_ADD_INCREMENT,
 } from "@/lib/rankings/favorite-ranking";
 import { parseRankingItems } from "@/lib/rankings/ranking-response";
 import { HOME_TRUST_CARDS, PRODUCT_TRUST_BADGES } from "@/lib/trust-signals";
@@ -943,113 +938,85 @@ export default function JGoApp({
     [favoriteLookbookRankings, lookbooks]
   );
 
-  const toggleFavorite = async (productId) => {
+  const toggleFavorite = (productId) => {
     const id = Number(productId);
     if (!id || Number.isNaN(id)) {
       return;
     }
 
     const isAdding = !favoriteIds.some((entry) => Number(entry) === id);
-    const previousIds = favoriteIds;
-    const previousProducts = products;
-    const previousRankings = favoriteProductRankings;
     const nextIds = toggleFavoriteId(favoriteIds, productId);
-    const delta = isAdding ? 1 : -1;
-
-    const optimisticProducts = bumpProductFavoriteCount(products, id, delta);
-    const optimisticRankings = bumpFavoriteProductRankings(favoriteProductRankings, id, delta);
 
     setFavoriteIds(nextIds);
     saveFavoriteIds(nextIds);
-    setProducts(optimisticProducts);
-    setFavoriteProductRankings(optimisticRankings);
 
-    if (isAdding) {
-      const product = findProductById(productCatalog, id);
-      trackFavoriteProduct({
-        id: product?.id ?? productId,
-        name: product?.name,
-        brand: product?.brand,
-        price: product?.price,
-      });
+    if (!isAdding) {
+      return;
     }
 
-    try {
-      const optimisticProduct = optimisticProducts.find((item) => Number(item.id) === id);
-      const fallbackCount = Math.max(0, Number(optimisticProduct?.favoriteCount ?? 0) || 0);
-      const { favoriteCount } = await syncProductFavoriteCount(id, isAdding ? "add" : "remove", fallbackCount);
-      const syncedProducts = setProductFavoriteCount(optimisticProducts, id, favoriteCount);
-      const syncedRankings = setFavoriteProductRankingCount(optimisticRankings, id, favoriteCount);
+    const nextProducts = bumpProductFavoriteCount(products, id, FRONTEND_FAVORITE_ADD_INCREMENT);
+    const nextRankings = bumpFavoriteProductRankings(
+      favoriteProductRankings,
+      id,
+      FRONTEND_FAVORITE_ADD_INCREMENT
+    );
 
-      setProducts(syncedProducts);
-      setFavoriteProductRankings(syncedRankings);
-      saveProductsCacheV2(syncedProducts);
-      saveHomeRankingsCache({
-        salesRankings,
-        favoriteProductRankings: syncedRankings,
-        favoriteLookbookRankings,
-      });
-    } catch (error) {
-      setFavoriteIds(previousIds);
-      saveFavoriteIds(previousIds);
-      setProducts(previousProducts);
-      setFavoriteProductRankings(previousRankings);
-      alert(error instanceof Error ? error.message : "收藏同步失敗，請稍後再試");
-    }
+    setProducts(nextProducts);
+    setFavoriteProductRankings(nextRankings);
+    saveProductsCacheV2(nextProducts);
+    saveHomeRankingsCache({
+      salesRankings,
+      favoriteProductRankings: nextRankings,
+      favoriteLookbookRankings,
+    });
+
+    const product = findProductById(productCatalog, id);
+    trackFavoriteProduct({
+      id: product?.id ?? productId,
+      name: product?.name,
+      brand: product?.brand,
+      price: product?.price,
+    });
   };
 
-  const toggleFavoriteLookbook = async (lookbookId) => {
+  const toggleFavoriteLookbook = (lookbookId) => {
     const id = Number(lookbookId);
     if (!id || Number.isNaN(id)) {
       return;
     }
 
     const isAdding = !favoriteLookbookIds.some((entry) => Number(entry) === id);
-    const previousIds = favoriteLookbookIds;
-    const previousLookbooks = lookbooks;
-    const previousRankings = favoriteLookbookRankings;
     const nextIds = toggleFavoriteLookbookId(favoriteLookbookIds, lookbookId);
-    const delta = isAdding ? 1 : -1;
-
-    const optimisticLookbooks = bumpLookbookFavoriteCount(lookbooks, id, delta);
-    const optimisticRankings = bumpFavoriteLookbookRankings(favoriteLookbookRankings, id, delta);
 
     setFavoriteLookbookIds(nextIds);
     saveFavoriteLookbookIds(nextIds);
-    setLookbooks(optimisticLookbooks);
-    setFavoriteLookbookRankings(optimisticRankings);
 
-    if (isAdding) {
-      const lookbook = lookbooks.find((item) => Number(item.id) === id);
-      trackFavoriteLookbook({
-        id: lookbook?.id ?? lookbookId,
-        title: lookbook?.title,
-        tag: lookbook?.tag,
-      });
+    if (!isAdding) {
+      return;
     }
 
-    try {
-      const optimisticLookbook = optimisticLookbooks.find((item) => Number(item.id) === id);
-      const fallbackCount = Math.max(0, Number(optimisticLookbook?.favoriteCount ?? 0) || 0);
-      const { favoriteCount } = await syncLookbookFavoriteCount(id, isAdding ? "add" : "remove", fallbackCount);
-      const syncedLookbooks = setLookbookFavoriteCount(optimisticLookbooks, id, favoriteCount);
-      const syncedRankings = setFavoriteLookbookRankingCount(optimisticRankings, id, favoriteCount);
+    const nextLookbooks = bumpLookbookFavoriteCount(lookbooks, id, FRONTEND_FAVORITE_ADD_INCREMENT);
+    const nextRankings = bumpFavoriteLookbookRankings(
+      favoriteLookbookRankings,
+      id,
+      FRONTEND_FAVORITE_ADD_INCREMENT
+    );
 
-      setLookbooks(syncedLookbooks);
-      setFavoriteLookbookRankings(syncedRankings);
-      saveHomeLookbooksCache(syncedLookbooks);
-      saveHomeRankingsCache({
-        salesRankings,
-        favoriteProductRankings,
-        favoriteLookbookRankings: syncedRankings,
-      });
-    } catch (error) {
-      setFavoriteLookbookIds(previousIds);
-      saveFavoriteLookbookIds(previousIds);
-      setLookbooks(previousLookbooks);
-      setFavoriteLookbookRankings(previousRankings);
-      alert(error instanceof Error ? error.message : "收藏同步失敗，請稍後再試");
-    }
+    setLookbooks(nextLookbooks);
+    setFavoriteLookbookRankings(nextRankings);
+    saveHomeLookbooksCache(nextLookbooks);
+    saveHomeRankingsCache({
+      salesRankings,
+      favoriteProductRankings,
+      favoriteLookbookRankings: nextRankings,
+    });
+
+    const lookbook = lookbooks.find((item) => Number(item.id) === id);
+    trackFavoriteLookbook({
+      id: lookbook?.id ?? lookbookId,
+      title: lookbook?.title,
+      tag: lookbook?.tag,
+    });
   };
 
   const loadHomeRankings = async ({ hasCache = hasHomeRankingsCache } = {}) => {

@@ -1,3 +1,6 @@
+/** Frontend-only increment when a user adds an item to「我的收藏」. */
+export const FRONTEND_FAVORITE_ADD_INCREMENT = 2;
+
 export function getFavoriteCount(value: unknown): number {
   const count = Number(value);
   return !Number.isNaN(count) && count > 0 ? count : 0;
