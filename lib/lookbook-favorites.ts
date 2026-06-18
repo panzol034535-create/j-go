@@ -45,15 +45,16 @@ export function toggleFavoriteLookbookId(ids: number[], lookbookId: number): num
     return ids;
   }
 
-  if (ids.includes(id)) {
-    return ids.filter((entry) => entry !== id);
+  if (ids.some((entry) => Number(entry) === id)) {
+    return ids.filter((entry) => Number(entry) !== id);
   }
 
   return [...ids, id];
 }
 
 export function isFavoriteLookbook(ids: number[], lookbookId: number): boolean {
-  return ids.includes(Number(lookbookId));
+  const id = Number(lookbookId);
+  return ids.some((entry) => Number(entry) === id);
 }
 
 export function resolveLookbookId(lookbook: { id?: unknown; lookbook_id?: unknown }, index = 0): number {

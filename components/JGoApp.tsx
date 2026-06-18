@@ -42,8 +42,14 @@ import {
 import { runPrelaunchChecks, summarizePrelaunchChecks } from "@/lib/prelaunch-check";
 import { resolveProductCatalog, findProductById, productIdsMatch } from "@/lib/products/product-catalog";
 import {
+  bumpFavoriteLookbookRankings,
   bumpFavoriteProductRankings,
+  bumpLookbookFavoriteCount,
   bumpProductFavoriteCount,
+  setFavoriteLookbookRankingCount,
+  setFavoriteProductRankingCount,
+  setLookbookFavoriteCount,
+  setProductFavoriteCount,
   syncLookbookFavoriteCount,
   syncProductFavoriteCount,
 } from "@/lib/rankings/favorite-ranking";
@@ -898,7 +904,9 @@ export default function JGoApp({
             tag: item.tag || "日本選品",
           }),
           rank: index + 1,
-          favoriteCount: Number(item.favorite_count ?? item.favoriteCount ?? localProduct?.favoriteCount ?? 0) || 0,
+          favoriteCount: localProduct != null
+            ? Math.max(0, Number(localProduct.favoriteCount ?? 0) || 0)
+            : Number(item.favorite_count ?? item.favoriteCount ?? 0) || 0,
         };
       })
       .filter(Boolean),
@@ -926,7 +934,9 @@ export default function JGoApp({
             product_ids: Array.isArray(item.product_ids) ? item.product_ids : [],
           }),
           rank: index + 1,
-          favoriteCount: Number(item.favorite_count ?? item.favoriteCount ?? localLookbook?.favoriteCount ?? 0) || 0,
+          favoriteCount: localLookbook != null
+            ? Math.max(0, Number(localLookbook.favoriteCount ?? 0) || 0)
+            : Number(item.favorite_count ?? item.favoriteCount ?? 0) || 0,
         };
       })
       .filter(Boolean),
@@ -939,21 +949,20 @@ export default function JGoApp({
       return;
     }
 
-    const isAdding = !favoriteIds.includes(id);
+    const isAdding = !favoriteIds.some((entry) => Number(entry) === id);
     const previousIds = favoriteIds;
     const previousProducts = products;
     const previousRankings = favoriteProductRankings;
     const nextIds = toggleFavoriteId(favoriteIds, productId);
     const delta = isAdding ? 1 : -1;
 
+    const optimisticProducts = bumpProductFavoriteCount(products, id, delta);
+    const optimisticRankings = bumpFavoriteProductRankings(favoriteProductRankings, id, delta);
+
     setFavoriteIds(nextIds);
     saveFavoriteIds(nextIds);
-
-    const nextProducts = bumpProductFavoriteCount(products, id, delta);
-    const nextRankings = bumpFavoriteProductRankings(favoriteProductRankings, id, delta);
-
-    setProducts(nextProducts);
-    setFavoriteProductRankings(nextRankings);
+    setProducts(optimisticProducts);
+    setFavoriteProductRankings(optimisticRankings);
 
     if (isAdding) {
       const product = findProductById(productCatalog, id);
@@ -965,22 +974,28 @@ export default function JGoApp({
       });
     }
 
-    const result = await syncProductFavoriteCount(id, isAdding ? "add" : "remove");
-    if (!result.ok) {
+    try {
+      const optimisticProduct = optimisticProducts.find((item) => Number(item.id) === id);
+      const fallbackCount = Math.max(0, Number(optimisticProduct?.favoriteCount ?? 0) || 0);
+      const { favoriteCount } = await syncProductFavoriteCount(id, isAdding ? "add" : "remove", fallbackCount);
+      const syncedProducts = setProductFavoriteCount(optimisticProducts, id, favoriteCount);
+      const syncedRankings = setFavoriteProductRankingCount(optimisticRankings, id, favoriteCount);
+
+      setProducts(syncedProducts);
+      setFavoriteProductRankings(syncedRankings);
+      saveProductsCacheV2(syncedProducts);
+      saveHomeRankingsCache({
+        salesRankings,
+        favoriteProductRankings: syncedRankings,
+        favoriteLookbookRankings,
+      });
+    } catch (error) {
       setFavoriteIds(previousIds);
       saveFavoriteIds(previousIds);
       setProducts(previousProducts);
       setFavoriteProductRankings(previousRankings);
-      alert(result.message || "收藏同步失敗，請稍後再試");
-      return;
+      alert(error instanceof Error ? error.message : "收藏同步失敗，請稍後再試");
     }
-
-    saveProductsCacheV2(nextProducts);
-    saveHomeRankingsCache({
-      salesRankings,
-      favoriteProductRankings: nextRankings,
-      favoriteLookbookRankings,
-    });
   };
 
   const toggleFavoriteLookbook = async (lookbookId) => {
@@ -989,19 +1004,20 @@ export default function JGoApp({
       return;
     }
 
-    const isAdding = !favoriteLookbookIds.includes(id);
+    const isAdding = !favoriteLookbookIds.some((entry) => Number(entry) === id);
     const previousIds = favoriteLookbookIds;
     const previousLookbooks = lookbooks;
+    const previousRankings = favoriteLookbookRankings;
     const nextIds = toggleFavoriteLookbookId(favoriteLookbookIds, lookbookId);
+    const delta = isAdding ? 1 : -1;
+
+    const optimisticLookbooks = bumpLookbookFavoriteCount(lookbooks, id, delta);
+    const optimisticRankings = bumpFavoriteLookbookRankings(favoriteLookbookRankings, id, delta);
 
     setFavoriteLookbookIds(nextIds);
     saveFavoriteLookbookIds(nextIds);
-
-    setLookbooks((prev) => prev.map((item) => (
-      Number(item.id) === id
-        ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) + (isAdding ? 1 : -1)) }
-        : item
-    )));
+    setLookbooks(optimisticLookbooks);
+    setFavoriteLookbookRankings(optimisticRankings);
 
     if (isAdding) {
       const lookbook = lookbooks.find((item) => Number(item.id) === id);
@@ -1012,12 +1028,27 @@ export default function JGoApp({
       });
     }
 
-    const result = await syncLookbookFavoriteCount(id, isAdding ? "add" : "remove");
-    if (!result.ok) {
+    try {
+      const optimisticLookbook = optimisticLookbooks.find((item) => Number(item.id) === id);
+      const fallbackCount = Math.max(0, Number(optimisticLookbook?.favoriteCount ?? 0) || 0);
+      const { favoriteCount } = await syncLookbookFavoriteCount(id, isAdding ? "add" : "remove", fallbackCount);
+      const syncedLookbooks = setLookbookFavoriteCount(optimisticLookbooks, id, favoriteCount);
+      const syncedRankings = setFavoriteLookbookRankingCount(optimisticRankings, id, favoriteCount);
+
+      setLookbooks(syncedLookbooks);
+      setFavoriteLookbookRankings(syncedRankings);
+      saveHomeLookbooksCache(syncedLookbooks);
+      saveHomeRankingsCache({
+        salesRankings,
+        favoriteProductRankings,
+        favoriteLookbookRankings: syncedRankings,
+      });
+    } catch (error) {
       setFavoriteLookbookIds(previousIds);
       saveFavoriteLookbookIds(previousIds);
       setLookbooks(previousLookbooks);
-      alert(result.message || "穿搭收藏同步失敗，請稍後再試");
+      setFavoriteLookbookRankings(previousRankings);
+      alert(error instanceof Error ? error.message : "收藏同步失敗，請稍後再試");
     }
   };
 

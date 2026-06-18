@@ -45,8 +45,8 @@ export function toggleFavoriteId(ids: number[], productId: number): number[] {
     return ids;
   }
 
-  if (ids.includes(id)) {
-    return ids.filter((entry) => entry !== id);
+  if (ids.some((entry) => Number(entry) === id)) {
+    return ids.filter((entry) => Number(entry) !== id);
   }
 
   return [...ids, id];
