@@ -2101,8 +2101,8 @@ export default function JGoApp({
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
-      <div className="mx-auto flex min-h-screen max-w-md flex-col bg-white shadow-2xl">
-        <header className="sticky top-0 z-10 border-b bg-white/90 px-5 py-4 backdrop-blur">
+      <div className="relative mx-auto flex min-h-screen max-w-md flex-col overflow-hidden bg-white shadow-2xl">
+        <header className="sticky top-0 z-30 shrink-0 border-b bg-white px-5 py-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-medium text-neutral-500">From Japan, To You</p>
@@ -2125,7 +2125,7 @@ export default function JGoApp({
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto px-5 py-5 pb-24">
+        <main className="relative z-0 flex-1 overflow-y-auto overscroll-y-contain px-5 py-5 pb-24">
           {tab === "home" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
               <section className="space-y-4">
@@ -4165,7 +4165,7 @@ export default function JGoApp({
           )}
         </main>
 
-        <nav className="sticky bottom-0 grid grid-cols-6 border-t bg-white px-1 py-2">
+        <nav className="sticky bottom-0 z-30 shrink-0 grid grid-cols-6 border-t bg-white px-1 py-2 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
           <NavButton active={tab === "home"} icon={<Home size={20} />} label="首頁" onClick={() => setTab("home")} />
           <NavButton active={tab === "lookbook" || tab === "lookbook-detail" || tab === "outfit-builder"} icon={<Sparkles size={20} />} label="穿搭" onClick={() => setTab("lookbook")} />
           <NavButton active={tab === "shop"} icon={<Search size={20} />} label="商品" onClick={() => setTab("shop")} />
