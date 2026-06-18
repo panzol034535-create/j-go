@@ -40,7 +40,10 @@ import {
   getShippingStatusClass,
 } from "@/lib/orders/order-status";
 import { runPrelaunchChecks, summarizePrelaunchChecks } from "@/lib/prelaunch-check";
+import { resolveProductCatalog, findProductById, productIdsMatch } from "@/lib/products/product-catalog";
 import {
+  bumpFavoriteProductRankings,
+  bumpProductFavoriteCount,
   syncLookbookFavoriteCount,
   syncProductFavoriteCount,
 } from "@/lib/rankings/favorite-ranking";
@@ -487,11 +490,11 @@ export default function JGoApp({
 
     setProducts(nextProducts);
     setSelectedProduct((prev) => {
-      const sameProduct = nextProducts.find((product) => product.id === prev?.id);
+      const sameProduct = nextProducts.find((product) => productIdsMatch(product.id, prev?.id));
       return sameProduct || nextProducts[0];
     });
 
-    const activeProduct = nextProducts.find((product) => product.id === selectedProduct?.id) || nextProducts[0];
+    const activeProduct = nextProducts.find((product) => productIdsMatch(product.id, selectedProduct?.id)) || nextProducts[0];
     if (!activeProduct) {
       return;
     }
@@ -822,7 +825,7 @@ export default function JGoApp({
         throw new Error(`刪除商品失敗：${response.status}，${text}`);
       }
 
-      if (selectedProduct?.id === productId) {
+      if (productIdsMatch(selectedProduct?.id, productId)) {
         setSelectedProduct(null);
       }
 
@@ -834,7 +837,9 @@ export default function JGoApp({
     }
   };
 
-  const catalogFilteredProducts = products.filter((product) => {
+  const productCatalog = useMemo(() => resolveProductCatalog(products), [products]);
+
+  const catalogFilteredProducts = productCatalog.filter((product) => {
     const genderMatched =
       activeGender === "all" ? true : product.gender === activeGender;
 
@@ -846,8 +851,8 @@ export default function JGoApp({
   const filteredProducts = filterProductsBySearch(catalogFilteredProducts, shopSearchQuery);
 
   const favoriteProducts = useMemo(
-    () => products.filter((product) => isFavoriteProduct(favoriteIds, product.id)),
-    [products, favoriteIds]
+    () => productCatalog.filter((product) => isFavoriteProduct(favoriteIds, product.id)),
+    [productCatalog, favoriteIds]
   );
 
   const favoriteLookbooks = useMemo(
@@ -858,7 +863,7 @@ export default function JGoApp({
   const topSalesProducts = useMemo(() => {
     return salesRankings
       .map((entry, index) => {
-        const product = products.find((item) => Number(item.id) === Number(entry.product_id));
+        const product = findProductById(productCatalog, entry.product_id);
         if (!product) {
           return null;
         }
@@ -870,14 +875,14 @@ export default function JGoApp({
         };
       })
       .filter(Boolean);
-  }, [salesRankings, products]);
+  }, [salesRankings, productCatalog]);
 
   const topFavoriteProducts = useMemo(
     () => parseRankingItems(favoriteProductRankings)
       .map((entry, index) => {
         const item = entry && typeof entry === "object" ? entry : {};
         const productId = Number(item.id ?? item.product_id);
-        const localProduct = products.find((product) => Number(product.id) === productId);
+        const localProduct = findProductById(productCatalog, productId);
 
         if (!localProduct && !item.name) {
           return null;
@@ -897,7 +902,7 @@ export default function JGoApp({
         };
       })
       .filter(Boolean),
-    [favoriteProductRankings, products]
+    [favoriteProductRankings, productCatalog]
   );
 
   const topFavoriteLookbooks = useMemo(
@@ -928,71 +933,92 @@ export default function JGoApp({
     [favoriteLookbookRankings, lookbooks]
   );
 
-  const toggleFavorite = (productId) => {
-    setFavoriteIds((prev) => {
-      const id = Number(productId);
-      const isAdding = !prev.includes(id);
-      const next = toggleFavoriteId(prev, productId);
+  const toggleFavorite = async (productId) => {
+    const id = Number(productId);
+    if (!id || Number.isNaN(id)) {
+      return;
+    }
 
-      if (isAdding) {
-        const product = products.find((item) => Number(item.id) === id);
-        trackFavoriteProduct({
-          id: product?.id ?? productId,
-          name: product?.name,
-          brand: product?.brand,
-          price: product?.price,
-        });
-        void syncProductFavoriteCount(id, "add");
-        setProducts((prev) => prev.map((item) => (
-          item.id === id
-            ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) + 1) }
-            : item
-        )));
-      } else {
-        void syncProductFavoriteCount(id, "remove");
-        setProducts((prev) => prev.map((item) => (
-          item.id === id
-            ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) - 1) }
-            : item
-        )));
-      }
+    const isAdding = !favoriteIds.includes(id);
+    const previousIds = favoriteIds;
+    const previousProducts = products;
+    const previousRankings = favoriteProductRankings;
+    const nextIds = toggleFavoriteId(favoriteIds, productId);
+    const delta = isAdding ? 1 : -1;
 
-      saveFavoriteIds(next);
-      return next;
+    setFavoriteIds(nextIds);
+    saveFavoriteIds(nextIds);
+
+    const nextProducts = bumpProductFavoriteCount(products, id, delta);
+    const nextRankings = bumpFavoriteProductRankings(favoriteProductRankings, id, delta);
+
+    setProducts(nextProducts);
+    setFavoriteProductRankings(nextRankings);
+
+    if (isAdding) {
+      const product = findProductById(productCatalog, id);
+      trackFavoriteProduct({
+        id: product?.id ?? productId,
+        name: product?.name,
+        brand: product?.brand,
+        price: product?.price,
+      });
+    }
+
+    const result = await syncProductFavoriteCount(id, isAdding ? "add" : "remove");
+    if (!result.ok) {
+      setFavoriteIds(previousIds);
+      saveFavoriteIds(previousIds);
+      setProducts(previousProducts);
+      setFavoriteProductRankings(previousRankings);
+      alert(result.message || "收藏同步失敗，請稍後再試");
+      return;
+    }
+
+    saveProductsCacheV2(nextProducts);
+    saveHomeRankingsCache({
+      salesRankings,
+      favoriteProductRankings: nextRankings,
+      favoriteLookbookRankings,
     });
   };
 
-  const toggleFavoriteLookbook = (lookbookId) => {
-    setFavoriteLookbookIds((prev) => {
-      const id = Number(lookbookId);
-      const isAdding = !prev.includes(id);
-      const next = toggleFavoriteLookbookId(prev, lookbookId);
+  const toggleFavoriteLookbook = async (lookbookId) => {
+    const id = Number(lookbookId);
+    if (!id || Number.isNaN(id)) {
+      return;
+    }
 
-      if (isAdding) {
-        const lookbook = lookbooks.find((item) => Number(item.id) === id);
-        trackFavoriteLookbook({
-          id: lookbook?.id ?? lookbookId,
-          title: lookbook?.title,
-          tag: lookbook?.tag,
-        });
-        void syncLookbookFavoriteCount(id, "add");
-        setLookbooks((prev) => prev.map((item) => (
-          item.id === id
-            ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) + 1) }
-            : item
-        )));
-      } else {
-        void syncLookbookFavoriteCount(id, "remove");
-        setLookbooks((prev) => prev.map((item) => (
-          item.id === id
-            ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) - 1) }
-            : item
-        )));
-      }
+    const isAdding = !favoriteLookbookIds.includes(id);
+    const previousIds = favoriteLookbookIds;
+    const previousLookbooks = lookbooks;
+    const nextIds = toggleFavoriteLookbookId(favoriteLookbookIds, lookbookId);
 
-      saveFavoriteLookbookIds(next);
-      return next;
-    });
+    setFavoriteLookbookIds(nextIds);
+    saveFavoriteLookbookIds(nextIds);
+
+    setLookbooks((prev) => prev.map((item) => (
+      Number(item.id) === id
+        ? { ...item, favoriteCount: Math.max(0, Number(item.favoriteCount || 0) + (isAdding ? 1 : -1)) }
+        : item
+    )));
+
+    if (isAdding) {
+      const lookbook = lookbooks.find((item) => Number(item.id) === id);
+      trackFavoriteLookbook({
+        id: lookbook?.id ?? lookbookId,
+        title: lookbook?.title,
+        tag: lookbook?.tag,
+      });
+    }
+
+    const result = await syncLookbookFavoriteCount(id, isAdding ? "add" : "remove");
+    if (!result.ok) {
+      setFavoriteLookbookIds(previousIds);
+      saveFavoriteLookbookIds(previousIds);
+      setLookbooks(previousLookbooks);
+      alert(result.message || "穿搭收藏同步失敗，請稍後再試");
+    }
   };
 
   const loadHomeRankings = async ({ hasCache = hasHomeRankingsCache } = {}) => {
@@ -1201,9 +1227,17 @@ export default function JGoApp({
       }
     }
 
-    void refreshProductsFromXano({ hasCache: productsHasData });
-    void loadLookbooks({ hasCache: lookbooksHasData });
-    void loadHomeRankings({ hasCache: rankingsHasData });
+    if (!productsHasData) {
+      void refreshProductsFromXano({ hasCache: false });
+    }
+
+    if (!lookbooksHasData) {
+      void loadLookbooks({ hasCache: false });
+    }
+
+    if (!rankingsHasData) {
+      void loadHomeRankings({ hasCache: false });
+    }
   }, []);
 
   const runPrelaunchChecklist = async () => {

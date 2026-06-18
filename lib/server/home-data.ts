@@ -1,27 +1,15 @@
 import { formatLookbookList } from "@/lib/lookbooks/format-lookbook-list";
-import { formatXanoProducts } from "@/lib/products/format-xano-product";
 import { resolveLookbookId } from "@/lib/lookbook-favorites";
+import { formatXanoProducts } from "@/lib/products/format-xano-product";
 import type { InitialRankings } from "@/lib/home-initial-data";
-import {
-  aggregateSalesByProductId,
-  buildProductNameIndex,
-  isOrderWithinPeriod,
-  isPaidOrder,
-  resolveOrderItemProductIdWithFallback,
-  resolveOrderItemProductName,
-  resolveOrderItemQty,
-} from "@/lib/rankings/sales-ranking";
 import {
   sortRecordsByFavoriteCount,
   toRecordArray,
 } from "@/lib/rankings/ranking-response";
+import { fetchXanoSalesRankings } from "@/lib/rankings/xano-sales-rankings";
 import { fetchMergedProducts } from "@/lib/server/fetch-products";
 import { fetchRevalidatedJson } from "@/lib/server/fetch-revalidated";
 
-const DEFAULT_ADMIN_ORDERS_URL =
-  "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-orders";
-const DEFAULT_ORDER_ITEMS_URL =
-  "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/order-items";
 const DEFAULT_LOOKBOOKS_URL =
   "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
 
@@ -73,71 +61,10 @@ function normalizeLookbookRankingItem(lookbook: Record<string, unknown>, index: 
   };
 }
 
-async function fetchSalesRankings(limit = 10): Promise<unknown[]> {
-  const ordersUrl = process.env.XANO_ADMIN_ORDERS_URL || DEFAULT_ADMIN_ORDERS_URL;
-  const orderItemsUrl = process.env.XANO_GET_ORDER_ITEMS_URL || DEFAULT_ORDER_ITEMS_URL;
-
-  const [ordersData, products] = await Promise.all([
-    fetchRevalidatedJson(ordersUrl),
-    fetchMergedProducts(),
-  ]);
-
-  const allOrders = toRecordArray(ordersData);
-  const nameIndex = buildProductNameIndex(products);
-
-  const eligibleOrders = allOrders.filter((order) => {
-    if (!isPaidOrder(order.payment_status)) {
-      return false;
-    }
-
-    return isOrderWithinPeriod(order.created_at, "week");
-  });
-
-  const itemGroups = await Promise.all(
-    eligibleOrders.map(async (order) => {
-      const orderId = Number(order.id);
-      if (!orderId) {
-        return [];
-      }
-
-      try {
-        const itemsData = await fetchRevalidatedJson(`${orderItemsUrl}?order_id=${orderId}`);
-        return toRecordArray(itemsData);
-      } catch {
-        return [];
-      }
-    })
-  );
-
-  const normalizedItems = itemGroups.flat().map((item) => {
-    const product_id = resolveOrderItemProductIdWithFallback(item, nameIndex);
-    return {
-      product_id,
-      qty: resolveOrderItemQty(item),
-      product_name: resolveOrderItemProductName(item),
-    };
-  });
-
-  return aggregateSalesByProductId(normalizedItems).slice(0, limit);
-}
-
-async function fetchFavoriteProductRankings(limit = 10): Promise<unknown[]> {
-  const products = await fetchMergedProducts();
-  return sortRecordsByFavoriteCount(products, limit).map(normalizeProductRankingItem);
-}
-
-async function fetchFavoriteLookbookRankings(limit = 10): Promise<unknown[]> {
+async function fetchLookbookRecords(): Promise<Record<string, unknown>[]> {
   const lookbooksUrl = process.env.XANO_LOOKBOOKS_URL || DEFAULT_LOOKBOOKS_URL;
   const data = await fetchRevalidatedJson(lookbooksUrl);
-  const lookbooks = toRecordArray(data);
-  return sortRecordsByFavoriteCount(lookbooks, limit).map(normalizeLookbookRankingItem);
-}
-
-async function fetchLookbooks(): Promise<ReturnType<typeof formatLookbookList>> {
-  const lookbooksUrl = process.env.XANO_LOOKBOOKS_URL || DEFAULT_LOOKBOOKS_URL;
-  const data = await fetchRevalidatedJson(lookbooksUrl);
-  const rawList = toRecordArray(data);
-  return formatLookbookList(rawList);
+  return toRecordArray(data);
 }
 
 export async function getHomePageData(): Promise<HomePageData> {
@@ -147,40 +74,36 @@ export async function getHomePageData(): Promise<HomePageData> {
     favoriteLookbookRankings: [],
   };
 
-  const [productsResult, lookbooksResult, rankingsResult] = await Promise.allSettled([
+  const [productsResult, lookbooksResult, salesResult] = await Promise.allSettled([
     fetchMergedProducts(),
-    fetchLookbooks(),
-    Promise.allSettled([
-      fetchSalesRankings(10),
-      fetchFavoriteProductRankings(10),
-      fetchFavoriteLookbookRankings(10),
-    ]),
+    fetchLookbookRecords(),
+    fetchXanoSalesRankings({ limit: 10, period: "week", revalidate: 60 }),
   ]);
 
-  const initialProducts =
-    productsResult.status === "fulfilled"
-      ? formatXanoProducts(productsResult.value)
-      : [];
-
-  const initialLookbooks =
+  const rawProducts =
+    productsResult.status === "fulfilled" ? productsResult.value : [];
+  const rawLookbooks =
     lookbooksResult.status === "fulfilled" ? lookbooksResult.value : [];
 
-  const initialRankings: InitialRankings = { ...emptyRankings };
+  const initialProducts = rawProducts.length > 0 ? formatXanoProducts(rawProducts) : [];
+  const initialLookbooks = rawLookbooks.length > 0 ? formatLookbookList(rawLookbooks) : [];
 
-  if (rankingsResult.status === "fulfilled") {
-    const [salesResult, favoriteProductsResult, favoriteLookbooksResult] = rankingsResult.value;
+  const initialRankings: InitialRankings = {
+    salesRankings: salesResult.status === "fulfilled" ? salesResult.value : [],
+    favoriteProductRankings: sortRecordsByFavoriteCount(rawProducts, 10).map(normalizeProductRankingItem),
+    favoriteLookbookRankings: sortRecordsByFavoriteCount(rawLookbooks, 10).map(normalizeLookbookRankingItem),
+  };
 
-    if (salesResult.status === "fulfilled") {
-      initialRankings.salesRankings = salesResult.value;
-    }
-
-    if (favoriteProductsResult.status === "fulfilled") {
-      initialRankings.favoriteProductRankings = favoriteProductsResult.value;
-    }
-
-    if (favoriteLookbooksResult.status === "fulfilled") {
-      initialRankings.favoriteLookbookRankings = favoriteLookbooksResult.value;
-    }
+  if (
+    initialRankings.salesRankings.length === 0 &&
+    initialRankings.favoriteProductRankings.length === 0 &&
+    initialRankings.favoriteLookbookRankings.length === 0
+  ) {
+    return {
+      initialProducts,
+      initialLookbooks,
+      initialRankings: emptyRankings,
+    };
   }
 
   return {

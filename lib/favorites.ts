@@ -53,5 +53,6 @@ export function toggleFavoriteId(ids: number[], productId: number): number[] {
 }
 
 export function isFavoriteProduct(ids: number[], productId: number): boolean {
-  return ids.includes(Number(productId));
+  const id = Number(productId);
+  return ids.some((entry) => Number(entry) === id);
 }

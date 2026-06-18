@@ -3,6 +3,7 @@ import {
   sortRecordsByFavoriteCount,
   toRecordArray,
 } from "@/lib/rankings/ranking-response";
+import { fetchRevalidatedJson } from "@/lib/server/fetch-revalidated";
 
 const DEFAULT_PRODUCTS_URL =
   "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/products";
@@ -34,14 +35,7 @@ export async function GET(request: NextRequest) {
   const productsUrl = process.env.XANO_PRODUCTS_URL || DEFAULT_PRODUCTS_URL;
 
   try {
-    const response = await fetch(`${productsUrl}?t=${Date.now()}`, { cache: "no-store" });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`讀取商品失敗：${response.status} ${text}`);
-    }
-
-    const data = await response.json();
+    const data = await fetchRevalidatedJson(productsUrl);
     const products = toRecordArray(data);
     const items = sortRecordsByFavoriteCount(products, limit).map(normalizeProductRankingItem);
 

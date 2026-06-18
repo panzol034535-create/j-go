@@ -4,6 +4,7 @@ import {
   sortRecordsByFavoriteCount,
   toRecordArray,
 } from "@/lib/rankings/ranking-response";
+import { fetchRevalidatedJson } from "@/lib/server/fetch-revalidated";
 
 const DEFAULT_LOOKBOOKS_URL =
   "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
@@ -31,14 +32,7 @@ export async function GET(request: NextRequest) {
   const lookbooksUrl = process.env.XANO_LOOKBOOKS_URL || DEFAULT_LOOKBOOKS_URL;
 
   try {
-    const response = await fetch(`${lookbooksUrl}?t=${Date.now()}`, { cache: "no-store" });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`讀取 Lookbook 失敗：${response.status} ${text}`);
-    }
-
-    const data = await response.json();
+    const data = await fetchRevalidatedJson(lookbooksUrl);
     const lookbooks = toRecordArray(data);
     const items = sortRecordsByFavoriteCount(lookbooks, limit).map(normalizeLookbookRankingItem);
 
