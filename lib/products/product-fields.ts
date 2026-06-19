@@ -71,7 +71,7 @@ export function getProductSizeNames(
 
   const fromField = parseCommaList(product.sizes);
   if (fromField.length > 0) {
-    return fromField;
+    return Array.from(new Set(fromField));
   }
 
   const fromVariants = (product.variants || [])
@@ -252,6 +252,23 @@ export function getVariantForColorAndSize(
   );
 }
 
+function dedupeSizeOptions(sizes: ProductSizeOption[]): ProductSizeOption[] {
+  const seen = new Set<string>();
+  const result: ProductSizeOption[] = [];
+
+  for (const size of sizes) {
+    const key = normalizeVariantSize(String(size.name || "").trim());
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(size);
+  }
+
+  return result;
+}
+
 export function getSizeOptionsForColor(
   product: {
     variants?: GroupedProductVariant[];
@@ -264,18 +281,21 @@ export function getSizeOptionsForColor(
   }
 
   const normalizedColor = normalizeColor(color);
-  const variant = product.variants?.find(
-    (item) => normalizeColor(item.color) === normalizedColor
-  );
-  if (variant?.sizes?.length) {
-    return variant.sizes;
+  const sizesFromVariants = (product.variants || [])
+    .filter((item) => normalizeColor(item.color) === normalizedColor)
+    .flatMap((item) => item.sizes || []);
+
+  if (sizesFromVariants.length > 0) {
+    return dedupeSizeOptions(sizesFromVariants);
   }
 
-  return getProductSizeNames(product).map((name) => ({
+  const fallbackSizes = getProductSizeNames(product).map((name) => ({
     name,
     stock: 999,
     stock_status: "unknown",
   }));
+
+  return dedupeSizeOptions(fallbackSizes);
 }
 
 export function isSizeOutOfStock(sizeOption?: ProductSizeOption | null): boolean {

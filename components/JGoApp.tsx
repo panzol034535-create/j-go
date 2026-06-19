@@ -332,6 +332,9 @@ export default function JGoApp({
     product_ids: "",
   });
   const [editingLookbookId, setEditingLookbookId] = useState(null);
+  const [lookbookImagePreview, setLookbookImagePreview] = useState("");
+  const [isUploadingLookbookImage, setIsUploadingLookbookImage] = useState(false);
+  const lookbookImageInputRef = React.useRef(null);
   const [sizeAI, setSizeAI] = useState({ gender: "male", height: "", weight: "" });
   const [sizeAIResult, setSizeAIResult] = useState(null);
   const [productForm, setProductForm] = useState({
@@ -587,6 +590,15 @@ export default function JGoApp({
       return;
     }
 
+    if (
+      lookbookForm.image.startsWith("data:") ||
+      lookbookForm.image.startsWith("blob:") ||
+      lookbookForm.image.startsWith("file:")
+    ) {
+      alert("請先完成圖片上傳，或使用有效的 https 圖片網址");
+      return;
+    }
+
     try {
       const url = editingLookbookId
         ? `${XANO_LOOKBOOKS_URL}/${editingLookbookId}`
@@ -610,7 +622,11 @@ export default function JGoApp({
       }
 
       setLookbookForm({ title: "", image: "", tag: "", gender: "unisex", product_ids: "" });
+      setLookbookImagePreview("");
       setEditingLookbookId(null);
+      if (lookbookImageInputRef.current) {
+        lookbookImageInputRef.current.value = "";
+      }
       await loadLookbooks();
       alert(editingLookbookId ? "Lookbook 已更新" : "Lookbook 已新增");
     } catch (error) {
@@ -621,6 +637,7 @@ export default function JGoApp({
 
   const startEditLookbook = (lookbook) => {
     setEditingLookbookId(lookbook.id);
+    setLookbookImagePreview("");
     setLookbookForm({
       title: lookbook.title || "",
       image: lookbook.image || "",
@@ -628,11 +645,74 @@ export default function JGoApp({
       gender: lookbook.gender || "unisex",
       product_ids: lookbook.raw_product_ids || lookbook.product_ids?.join(",") || "",
     });
+    if (lookbookImageInputRef.current) {
+      lookbookImageInputRef.current.value = "";
+    }
   };
 
   const cancelEditLookbook = () => {
     setEditingLookbookId(null);
+    setLookbookImagePreview("");
     setLookbookForm({ title: "", image: "", tag: "", gender: "unisex", product_ids: "" });
+    if (lookbookImageInputRef.current) {
+      lookbookImageInputRef.current.value = "";
+    }
+  };
+
+  const handleLookbookImageUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !isAdmin) {
+      return;
+    }
+
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (!allowedTypes.includes(file.type)) {
+      alert("僅支援 JPG、PNG、WEBP 圖片");
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert("圖片大小不可超過 10MB");
+      event.target.value = "";
+      return;
+    }
+
+    setIsUploadingLookbookImage(true);
+
+    try {
+      const preview = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("無法讀取圖片預覽"));
+        reader.readAsDataURL(file);
+      });
+
+      setLookbookImagePreview(preview);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/admin/upload-lookbook-image", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.url) {
+        throw new Error(data.error || "圖片上傳失敗");
+      }
+
+      setLookbookForm((prev) => ({ ...prev, image: data.url }));
+    } catch (error) {
+      console.error(error);
+      setLookbookImagePreview("");
+      setLookbookForm((prev) => ({ ...prev, image: "" }));
+      alert(error instanceof Error ? error.message : "圖片上傳失敗");
+    } finally {
+      setIsUploadingLookbookImage(false);
+      event.target.value = "";
+    }
   };
 
   const deleteLookbook = async (lookbookId) => {
@@ -1553,7 +1633,7 @@ export default function JGoApp({
     ? getSizeOptionsForColor(selectedProduct, selectedColor)
     : [];
 
-  const availableSizes = availableSizeOptions.map((size) => size.name);
+  const availableSizes = Array.from(new Set(availableSizeOptions.map((size) => size.name)));
   const selectedSizeOption = getVariantForColorAndSize(selectedProduct, selectedColor, selectedSize);
   const selectedProductDescription = selectedProduct ? getProductDescription(selectedProduct) : "";
   const colorStockMaps = selectedProduct ? getColorStockMaps(selectedProduct) : { statusMap: {}, stockMap: {} };
@@ -3020,6 +3100,7 @@ export default function JGoApp({
                 options={availableSizes}
                 value={selectedSize}
                 setValue={setSelectedSize}
+                optionKeyPrefix={`${selectedProduct.id}-${selectedColor}`}
                 disabledOptions={availableSizeOptions.filter((size) => isSizeOutOfStock(size)).map((size) => size.name)}
                 statusMap={Object.fromEntries(availableSizeOptions.map((size) => [size.name, size.stock_status || "unknown"]))}
                 stockMap={Object.fromEntries(availableSizeOptions.map((size) => [size.name, getSizeStockQty(size)]))}
@@ -3654,12 +3735,51 @@ export default function JGoApp({
                     value={lookbookForm.title}
                     onChange={(value) => setLookbookForm({ ...lookbookForm, title: value })}
                   />
-                  <Input
-                    label="圖片網址"
-                    placeholder="https://...jpg"
-                    value={lookbookForm.image}
-                    onChange={(value) => setLookbookForm({ ...lookbookForm, image: value })}
-                  />
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-bold">圖片網址</span>
+                    <div className="flex gap-2">
+                      <div className="flex h-12 min-w-0 flex-1 items-center rounded-2xl border border-neutral-200 px-4 focus-within:border-neutral-900">
+                        <input
+                          className="h-full w-full bg-transparent text-sm outline-none"
+                          placeholder="https://...jpg"
+                          value={lookbookForm.image}
+                          onChange={(e) => {
+                            setLookbookForm({ ...lookbookForm, image: e.target.value });
+                            setLookbookImagePreview("");
+                          }}
+                        />
+                      </div>
+                      <input
+                        ref={lookbookImageInputRef}
+                        type="file"
+                        accept="image/jpeg,image/jpg,image/png,image/webp"
+                        className="hidden"
+                        onChange={handleLookbookImageUpload}
+                      />
+                      <button
+                        type="button"
+                        disabled={isUploadingLookbookImage}
+                        onClick={() => lookbookImageInputRef.current?.click()}
+                        className="shrink-0 rounded-2xl border border-neutral-200 bg-white px-4 text-xs font-bold text-neutral-700 disabled:opacity-50"
+                      >
+                        {isUploadingLookbookImage ? "上傳中..." : "上傳圖片"}
+                      </button>
+                    </div>
+                    {(lookbookImagePreview || lookbookForm.image) ? (
+                      <div className="mt-3 overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-50">
+                        <img
+                          src={lookbookImagePreview || lookbookForm.image}
+                          alt="Lookbook 預覽"
+                          className="h-40 w-full object-cover"
+                        />
+                        {lookbookForm.image ? (
+                          <p className="truncate px-3 py-2 text-[11px] text-neutral-500">{lookbookForm.image}</p>
+                        ) : (
+                          <p className="px-3 py-2 text-[11px] text-amber-600">預覽中，正在上傳到雲端...</p>
+                        )}
+                      </div>
+                    ) : null}
+                  </label>
                   <Input
                     label="風格標籤"
                     placeholder="CITY BOY"
@@ -4469,7 +4589,7 @@ function ProductAccordion({ sections }) {
   );
 }
 
-function OptionGroup({ title, options, value, setValue, disabledOptions = [], stockMap = {}, statusMap = {} }) {
+function OptionGroup({ title, options, value, setValue, disabledOptions = [], stockMap = {}, statusMap = {}, optionKeyPrefix = "" }) {
   return (
     <section>
       <h3 className="mb-3 font-bold">{title}</h3>
@@ -4483,7 +4603,7 @@ function OptionGroup({ title, options, value, setValue, disabledOptions = [], st
 
           return (
             <button
-              key={option}
+              key={optionKeyPrefix ? `${optionKeyPrefix}-${option}` : option}
               type="button"
               disabled={isDisabled}
               onClick={() => !isDisabled && setValue(option)}

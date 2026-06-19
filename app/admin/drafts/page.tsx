@@ -19,6 +19,14 @@ export default function DraftsPage() {
   const [genderDrafts, setGenderDrafts] = useState<Record<number, ProductGender>>({});
   const [sizeTableDrafts, setSizeTableDrafts] = useState<Record<number, ZozoSizeTableRow[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedDescriptions, setExpandedDescriptions] = useState<Record<number, boolean>>({});
+
+  const toggleDescription = (productId: number) => {
+    setExpandedDescriptions((prev) => ({
+      ...prev,
+      [productId]: !prev[productId],
+    }));
+  };
 
   const filteredProducts = useMemo(
     () =>
@@ -287,11 +295,34 @@ export default function DraftsPage() {
                 />
               </div>
 
-              {product.description_zh && (
-                <p className="border-t border-neutral-100 px-4 py-3 text-sm leading-relaxed text-neutral-600">
-                  {product.description_zh}
-                </p>
-              )}
+              {(() => {
+                const description =
+                  product.description_zh?.trim() ||
+                  product.description_jp?.trim() ||
+                  "";
+                const isDescriptionExpanded = expandedDescriptions[product.id] === true;
+
+                if (!description) {
+                  return null;
+                }
+
+                return (
+                  <div className="border-t border-neutral-100 px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleDescription(product.id)}
+                      className="text-xs font-bold text-neutral-700 underline decoration-neutral-300 underline-offset-2"
+                    >
+                      {isDescriptionExpanded ? "收合商品介紹" : "查看商品介紹"}
+                    </button>
+                    {isDescriptionExpanded ? (
+                      <div className="mt-3 max-h-[300px] overflow-y-auto rounded-2xl bg-neutral-50 p-3 text-sm leading-relaxed text-neutral-600">
+                        <p className="whitespace-pre-wrap">{description}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })()}
 
               {product.tags?.length > 0 && (
                 <div className="flex flex-wrap gap-2 border-t border-neutral-100 px-4 py-3">
