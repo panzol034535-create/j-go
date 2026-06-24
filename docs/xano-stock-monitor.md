@@ -46,14 +46,30 @@ Body：
 ```json
 {
   "product_id": 1,
-  "last_checked_at": "2026-06-12T10:00:00.000Z",
+  "current_jpy_price": 8900,
+  "jpy_price": 8900,
+  "price": 3004,
   "last_price_jpy": 8900,
-  "last_stock_status": "unknown",
-  "check_status": "requires_browser_check"
+  "last_stock_status": "in_stock",
+  "check_status": "ok",
+  "last_checked_at": "2026-06-12T10:00:00.000Z"
 }
 ```
 
+- `current_jpy_price`：ZOZO 同步庫存時抓到的目前日幣售價（選填；無效時只更新庫存）
+- `price`：由 Xano `settings.jpy_rate × settings.profit_rate` 計算後四捨五入的台幣售價
+- 此 endpoint 只應更新價格／監控相關欄位，不要覆寫 `name_zh`、`images`、`description` 等
+
 環境變數：`XANO_UPDATE_PRODUCT_STOCK_URL`
+
+### GET settings（同步售價用）
+
+J-GO 同步庫存時會讀取：
+
+- `jpy_rate`
+- `profit_rate`
+
+環境變數：`XANO_SETTINGS_URL`（未設定時使用 import 預設 0.25 × 1.35）
 
 ### POST create-stock-check
 

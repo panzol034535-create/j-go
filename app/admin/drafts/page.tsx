@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { deferClientUpdate } from "@/lib/react/defer-client-update";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { SizeTableEditor } from "@/components/admin/SizeTableEditor";
 import { openStockSync } from "@/lib/admin/stock-sync";
@@ -74,7 +75,9 @@ export default function DraftsPage() {
   }, []);
 
   useEffect(() => {
-    loadDrafts();
+    deferClientUpdate(() => {
+      void loadDrafts();
+    });
   }, [loadDrafts]);
 
   const handlePublish = async (productId: number) => {

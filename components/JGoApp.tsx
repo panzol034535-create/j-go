@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import React, { useMemo, useState, useEffect, useRef } from "react";
@@ -69,9 +68,19 @@ import {
   saveFavoriteLookbookIds,
   toggleFavoriteLookbookId,
 } from "@/lib/lookbook-favorites";
-import { formatLookbookList } from "@/lib/lookbooks/format-lookbook-list";
-import { formatXanoProducts } from "@/lib/products/format-xano-product";
+import { formatLookbookList, type FormattedLookbook } from "@/lib/lookbooks/format-lookbook-list";
+import { formatXanoProducts, type FormattedXanoProduct } from "@/lib/products/format-xano-product";
 import { hasInitialRankings, type InitialRankings } from "@/lib/home-initial-data";
+import type { HomePageData } from "@/lib/server/home-data";
+import { deferClientUpdate } from "@/lib/react/defer-client-update";
+import type {
+  JGoCartItem,
+  JGoOrder,
+  JGoUser,
+  StockQtyMap,
+  StockStatusMap,
+} from "@/lib/types/jgo-app";
+import type { SizeRecommendationResult } from "@/lib/products/size-recommendation";
 import {
   readHomeLookbooksCache,
   readHomeProductsCache,
@@ -82,7 +91,15 @@ import {
   saveProductsCacheV2,
 } from "@/lib/home-cache";
 
-function Button({ children, onClick, className = "" }) {
+function Button({
+  children,
+  onClick,
+  className = "",
+}: {
+  children: React.ReactNode;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
+  className?: string;
+}) {
   const hasColorOverride = className.includes("text-neutral") || className.includes("text-black") || className.includes("text-white");
 
   return (
@@ -95,29 +112,41 @@ function Button({ children, onClick, className = "" }) {
   );
 }
 
-function Card({ children, className = "" }) {
+function Card({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return <div className={`border bg-white ${className}`}>{children}</div>;
 }
 
-function CardContent({ children, className = "" }) {
+function CardContent({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return <div className={className}>{children}</div>;
 }
 
-const fallbackProducts = [];
+const fallbackProducts: FormattedXanoProduct[] = [];
 
-function formatPrice(n) {
+function formatPrice(n: number | string | unknown) {
   const value = Number(n);
   if (Number.isNaN(value)) return "NT$ 0";
   return `NT$ ${value.toLocaleString("zh-TW")}`;
 }
 
-function formatProductGender(gender) {
+function formatProductGender(gender: string | undefined) {
   if (gender === "male") return "男生";
   if (gender === "female") return "女生";
   return "中性";
 }
 
-function getStockDisplayLabel(status, stock) {
+function getStockDisplayLabel(status: string | undefined, stock: number | undefined) {
   if (status === "out_of_stock" || (typeof stock === "number" && stock <= 0)) {
     return "已售完";
   }
@@ -133,9 +162,9 @@ function getStockDisplayLabel(status, stock) {
   return "";
 }
 
-function getColorStockMaps(product) {
-  const statusMap = {};
-  const stockMap = {};
+function getColorStockMaps(product: FormattedXanoProduct | null | undefined) {
+  const statusMap: StockStatusMap = {};
+  const stockMap: StockQtyMap = {};
 
   for (const color of getProductColorOptions(product)) {
     const sizes = getSizeOptionsForColor(product, color);
@@ -155,7 +184,10 @@ function getColorStockMaps(product) {
   return { statusMap, stockMap };
 }
 
-function buildProductFeatureText(product, description) {
+function buildProductFeatureText(
+  product: FormattedXanoProduct | null | undefined,
+  description: string
+) {
   return [
     description,
     product?.material ? `材質：${product.material}` : "",
@@ -163,7 +195,7 @@ function buildProductFeatureText(product, description) {
   ].filter(Boolean).join("\n\n");
 }
 
-function buildProductSizeInfoText(product) {
+function buildProductSizeInfoText(product: FormattedXanoProduct | null | undefined) {
   const model = getProductModelSizeFields(product);
   const modelText = formatModelSizeDisplay({
     model_height_cm: model.height || null,
@@ -178,7 +210,7 @@ function buildProductSizeInfoText(product) {
   ].filter(Boolean).join("\n");
 }
 
-function buildBrandIntroText(product) {
+function buildBrandIntroText(product: FormattedXanoProduct | null | undefined) {
   const brand = product?.brand?.trim();
   if (!brand) return "";
 
@@ -191,7 +223,7 @@ function buildBrandIntroText(product) {
 
 const SIZE_ORDER = ["XS", "S", "M", "L", "XL", "XXL", "FREE"];
 
-function getAvailableSizeNames(product) {
+function getAvailableSizeNames(product: FormattedXanoProduct | null | undefined) {
   if (!product) {
     return [];
   }
@@ -237,24 +269,38 @@ const EMPTY_INITIAL_RANKINGS: InitialRankings = {
 };
 
 export default function JGoApp({
-  initialProducts = [],
-  initialLookbooks = [],
+  initialProducts,
+  initialLookbooks,
   initialRankings = EMPTY_INITIAL_RANKINGS,
-}) {
+}: HomePageData) {
   const hasInitialProducts = initialProducts.length > 0;
   const hasInitialLookbooks = initialLookbooks.length > 0;
   const hasInitialRankingsData = hasInitialRankings(initialRankings);
   const { user, isSignedIn } = useUser();
   const [tab, setTab] = useState("home");
-  const [products, setProducts] = useState(initialProducts);
-  const [lookbooks, setLookbooks] = useState(initialLookbooks);
-  const [selectedLookbook, setSelectedLookbook] = useState(null);
-  const [outfitSelections, setOutfitSelections] = useState({});
+  const [products, setProducts] = useState<FormattedXanoProduct[]>(initialProducts);
+  const [lookbooks, setLookbooks] = useState<FormattedLookbook[]>(initialLookbooks);
+  const [selectedLookbook, setSelectedLookbook] = useState<FormattedLookbook | null>(null);
+  const [outfitSelections, setOutfitSelections] = useState<Record<number, string>>({});
   const [activeGender, setActiveGender] = useState("all");
   const [activeBrand, setActiveBrand] = useState("all");
   const [shopSearchQuery, setShopSearchQuery] = useState("");
-  const [favoriteIds, setFavoriteIds] = useState([]);
-  const [favoriteLookbookIds, setFavoriteLookbookIds] = useState([]);
+  const [favoriteIds, setFavoriteIds] = useState<number[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      return loadFavoriteIds();
+    } catch {
+      return [];
+    }
+  });
+  const [favoriteLookbookIds, setFavoriteLookbookIds] = useState<number[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      return loadFavoriteLookbookIds();
+    } catch {
+      return [];
+    }
+  });
   const [favoritesTab, setFavoritesTab] = useState("products");
   const [loadingProducts, setLoadingProducts] = useState(!hasInitialProducts);
   const [isHomeDataLoading, setIsHomeDataLoading] = useState(!hasInitialProducts);
@@ -266,19 +312,27 @@ export default function JGoApp({
   const [homeDataLoadError, setHomeDataLoadError] = useState(false);
   const [lookbooksLoadError, setLookbooksLoadError] = useState(false);
   const [rankingLoadError, setRankingLoadError] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedProduct, setSelectedProduct] = useState<FormattedXanoProduct | null>(null);
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [mounted, setMounted] = useState(false);
-  const [cartCount, setCartCount] = useState(0);
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState<JGoCartItem[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const savedCart = localStorage.getItem("jgo_cart");
+      const parsedCart = savedCart ? JSON.parse(savedCart) : [];
+      return Array.isArray(parsedCart) ? parsedCart : [];
+    } catch {
+      return [];
+    }
+  });
   const [delivery, setDelivery] = useState(() => {
     if (typeof window === "undefined") return "711";
     return localStorage.getItem("jgo_delivery") || "711";
   });
-  const [orders, setOrders] = useState([]);
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [orders, setOrders] = useState<JGoOrder[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<JGoOrder | null>(null);
   const [orderFilter, setOrderFilter] = useState("all");
   const [trackingForms, setTrackingForms] = useState({});
   const [prelaunchChecks, setPrelaunchChecks] = useState([]);
@@ -300,7 +354,7 @@ export default function JGoApp({
   const [favoriteLookbooksRankingError, setFavoriteLookbooksRankingError] = useState(false);
   const checkoutTrackedRef = useRef(false);
   const [authMode, setAuthMode] = useState("login");
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState<JGoUser | null>(null);
   const [authForm, setAuthForm] = useState({ name: "", email: "", phone: "", password: "" });
   const [accountForm, setAccountForm] = useState({ name: "", email: "", phone: "" });
   const [checkoutForm, setCheckoutForm] = useState({ name: "", email: "", phone: "" });
@@ -336,7 +390,7 @@ export default function JGoApp({
   const [isUploadingLookbookImage, setIsUploadingLookbookImage] = useState(false);
   const lookbookImageInputRef = React.useRef(null);
   const [sizeAI, setSizeAI] = useState({ gender: "male", height: "", weight: "" });
-  const [sizeAIResult, setSizeAIResult] = useState(null);
+  const [sizeAIResult, setSizeAIResult] = useState<SizeRecommendationResult | null>(null);
   const [productForm, setProductForm] = useState({
     name: "",
     brand: "",
@@ -359,6 +413,7 @@ export default function JGoApp({
     size_chart: "",
   });
   const [editingProductId, setEditingProductId] = useState(null);
+  const [defaultShippedAtValue] = useState(() => toDatetimeLocalValue(Date.now()));
   const isAdmin = user?.primaryEmailAddress?.emailAddress === "panzol034535@gmail.com";
   const touchStartX = React.useRef(null);
   const ordersLoadingRef = React.useRef(false);
@@ -367,14 +422,16 @@ export default function JGoApp({
 
   useEffect(() => {
     if (!isSignedIn || !user) {
-      setCurrentUser(null);
-      localStorage.removeItem("jgo_current_user");
-      setAccountForm({ name: "", email: "", phone: "" });
-      setCheckoutForm({ name: "", email: "", phone: "" });
+      deferClientUpdate(() => {
+        setCurrentUser(null);
+        localStorage.removeItem("jgo_current_user");
+        setAccountForm({ name: "", email: "", phone: "" });
+        setCheckoutForm({ name: "", email: "", phone: "" });
+      });
       return;
     }
 
-    const clerkUser = {
+    const clerkUser: JGoUser = {
       id: user.id,
       name: user.fullName || user.firstName || "J-GO 會員",
       email: user.primaryEmailAddress?.emailAddress || "",
@@ -382,42 +439,20 @@ export default function JGoApp({
       provider: "Clerk",
     };
 
-    setCurrentUser(clerkUser);
-    localStorage.setItem("jgo_current_user", JSON.stringify(clerkUser));
-    setAccountForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
-    setCheckoutForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
+    deferClientUpdate(() => {
+      setCurrentUser(clerkUser);
+      localStorage.setItem("jgo_current_user", JSON.stringify(clerkUser));
+      setAccountForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
+      setCheckoutForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
+    });
   }, [isSignedIn, user?.id]);
 
   useEffect(() => {
-    try {
-      const savedCart = localStorage.getItem("jgo_cart");
-      const parsedCart = savedCart ? JSON.parse(savedCart) : [];
-      const nextCart = Array.isArray(parsedCart) ? parsedCart : [];
-      setCart(nextCart);
-      setCartCount(nextCart.length);
-    } catch {
-      setCart([]);
-      setCartCount(0);
-    }
-
-    setMounted(true);
-
-    try {
-      setFavoriteIds(loadFavoriteIds());
-    } catch {
-      setFavoriteIds([]);
-    }
-
-    try {
-      setFavoriteLookbookIds(loadFavoriteLookbookIds());
-    } catch {
-      setFavoriteLookbookIds([]);
-    }
+    deferClientUpdate(() => setMounted(true));
   }, []);
 
   useEffect(() => {
     if (!mounted) return;
-    setCartCount(cart.length);
     localStorage.setItem("jgo_cart", JSON.stringify(cart));
   }, [cart, mounted]);
 
@@ -429,67 +464,7 @@ export default function JGoApp({
     localStorage.setItem("jgo_delivery", delivery);
   }, [delivery]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-
-    if (params.get("payment") === "success") {
-      const savedUser = localStorage.getItem("jgo_current_user");
-
-      if (savedUser) {
-        try {
-          const user = JSON.parse(savedUser);
-          trackPurchaseSuccess(readLatestPurchaseFromStorage(user.email));
-        } catch {
-          trackPurchaseSuccess();
-        }
-      } else {
-        trackPurchaseSuccess();
-      }
-
-      setPaymentMessage("付款成功，正在更新訂單...");
-      setTab("payment-result");
-      refreshProductsFromXano({ hasCache: true });
-
-      if (savedUser) {
-        const user = JSON.parse(savedUser);
-        setCurrentUser(user);
-
-        setTimeout(async () => {
-          await loadOrdersForUser(user);
-          setTab("orders");
-        }, 3500);
-      }
-
-      window.history.replaceState({}, "", window.location.pathname);
-      return;
-    }
-
-    const storeId = params.get("store_id") || params.get("CVSStoreID");
-    const storeName = params.get("store_name") || params.get("CVSStoreName");
-    const storeAddress = params.get("address") || params.get("CVSAddress");
-
-    if (storeId && storeName) {
-      const nextPickupStore = {
-        store_id: storeId,
-        store_name: storeName,
-        address: storeAddress || "",
-      };
-      setPickupStore(nextPickupStore);
-      localStorage.setItem("jgo_pickup_store", JSON.stringify(nextPickupStore));
-      setDelivery("711");
-      setTab("checkout");
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (tab === "orders" && currentUser?.email) {
-      loadOrdersForUser(currentUser);
-    }
-  }, [tab, currentUser?.email]);
-
-  const applyProducts = (nextProducts) => {
+  const applyProducts = (nextProducts: FormattedXanoProduct[]) => {
     if (!Array.isArray(nextProducts) || nextProducts.length === 0) return;
 
     setProducts(nextProducts);
@@ -517,7 +492,7 @@ export default function JGoApp({
     setSelectedImageIndex(0);
   };
 
-  const refreshProductsFromXano = async ({ hasCache = hasProductsCache } = {}) => {
+  const refreshProductsFromXano = async ({ hasCache = hasProductsCache }: { hasCache?: boolean } = {}) => {
     if (!hasCache) {
       setLoadingProducts(true);
       setIsHomeDataLoading(true);
@@ -631,7 +606,7 @@ export default function JGoApp({
       alert(editingLookbookId ? "Lookbook 已更新" : "Lookbook 已新增");
     } catch (error) {
       console.error(error);
-      alert(error.message || `${editingLookbookId ? "更新" : "新增"} Lookbook 失敗`);
+      alert(error instanceof Error ? error.message : `${editingLookbookId ? "更新" : "新增"} Lookbook 失敗`);
     }
   };
 
@@ -732,7 +707,7 @@ export default function JGoApp({
       await loadLookbooks();
     } catch (error) {
       console.error(error);
-      alert(error.message || "刪除 Lookbook 失敗");
+      alert(error instanceof Error ? error.message : "刪除 Lookbook 失敗");
     }
   };
 
@@ -825,7 +800,7 @@ export default function JGoApp({
       alert("全部商品價格已重算");
     } catch (error) {
       console.error(error);
-      alert(error.message || "重算價格失敗");
+      alert(error instanceof Error ? error.message : "重算價格失敗");
     }
   };
 
@@ -886,7 +861,7 @@ export default function JGoApp({
       alert(editingProductId ? "商品已更新" : "商品已新增");
     } catch (error) {
       console.error(error);
-      alert(error.message || `${editingProductId ? "更新" : "新增"}商品失敗`);
+      alert(error instanceof Error ? error.message : `${editingProductId ? "更新" : "新增"}商品失敗`);
     }
   };
 
@@ -914,7 +889,7 @@ export default function JGoApp({
       alert("商品已刪除");
     } catch (error) {
       console.error(error);
-      alert(error.message || "刪除商品失敗");
+      alert(error instanceof Error ? error.message : "刪除商品失敗");
     }
   };
 
@@ -1251,21 +1226,25 @@ export default function JGoApp({
         const cachedProducts = readProductsCacheV2();
         if (Array.isArray(cachedProducts) && cachedProducts.length > 0) {
           console.log("PRODUCT CACHE COUNT", cachedProducts.length);
-          applyProducts(cachedProducts);
+          deferClientUpdate(() => {
+            applyProducts(cachedProducts);
+            setHasProductsCache(true);
+            setLoadingProducts(false);
+            setIsHomeDataLoading(false);
+          });
           productsHasData = true;
-          setHasProductsCache(true);
-          setLoadingProducts(false);
-          setIsHomeDataLoading(false);
         } else {
           const legacyHomeProducts = readHomeProductsCache();
           if (Array.isArray(legacyHomeProducts) && legacyHomeProducts.length > 0) {
             console.log("PRODUCT CACHE COUNT", legacyHomeProducts.length);
-            applyProducts(legacyHomeProducts);
-            saveProductsCacheV2(legacyHomeProducts);
+            deferClientUpdate(() => {
+              applyProducts(legacyHomeProducts);
+              saveProductsCacheV2(legacyHomeProducts);
+              setHasProductsCache(true);
+              setLoadingProducts(false);
+              setIsHomeDataLoading(false);
+            });
             productsHasData = true;
-            setHasProductsCache(true);
-            setLoadingProducts(false);
-            setIsHomeDataLoading(false);
           }
         }
       } catch (error) {
@@ -1277,10 +1256,12 @@ export default function JGoApp({
       try {
         const cachedLookbooks = readHomeLookbooksCache();
         if (Array.isArray(cachedLookbooks) && cachedLookbooks.length > 0) {
-          setLookbooks(cachedLookbooks);
+          deferClientUpdate(() => {
+            setLookbooks(cachedLookbooks);
+            setHasHomeLookbooksCache(true);
+            setIsLookbookLoading(false);
+          });
           lookbooksHasData = true;
-          setHasHomeLookbooksCache(true);
-          setIsLookbookLoading(false);
         }
       } catch (error) {
         console.error("讀取 Lookbook 快取失敗", error);
@@ -1291,14 +1272,16 @@ export default function JGoApp({
       try {
         const cachedRankings = readHomeRankingsCache();
         if (cachedRankings && hasInitialRankings(cachedRankings)) {
-          setSalesRankings(cachedRankings.salesRankings);
-          setFavoriteProductRankings(cachedRankings.favoriteProductRankings);
-          setFavoriteLookbookRankings(cachedRankings.favoriteLookbookRankings);
+          deferClientUpdate(() => {
+            setSalesRankings(cachedRankings.salesRankings);
+            setFavoriteProductRankings(cachedRankings.favoriteProductRankings);
+            setFavoriteLookbookRankings(cachedRankings.favoriteLookbookRankings);
+            setHasHomeRankingsCache(true);
+            setIsRankingLoading(false);
+            setIsFavoriteProductsRankingLoading(false);
+            setIsFavoriteLookbooksRankingLoading(false);
+          });
           rankingsHasData = true;
-          setHasHomeRankingsCache(true);
-          setIsRankingLoading(false);
-          setIsFavoriteProductsRankingLoading(false);
-          setIsFavoriteLookbooksRankingLoading(false);
         }
       } catch (error) {
         console.error("讀取排行榜快取失敗", error);
@@ -1306,15 +1289,21 @@ export default function JGoApp({
     }
 
     if (!productsHasData) {
-      void refreshProductsFromXano({ hasCache: false });
+      deferClientUpdate(() => {
+        void refreshProductsFromXano({ hasCache: false });
+      });
     }
 
     if (!lookbooksHasData) {
-      void loadLookbooks({ hasCache: false });
+      deferClientUpdate(() => {
+        void loadLookbooks({ hasCache: false });
+      });
     }
 
     if (!rankingsHasData) {
-      void loadHomeRankings({ hasCache: false });
+      deferClientUpdate(() => {
+        void loadHomeRankings({ hasCache: false });
+      });
     }
   }, []);
 
@@ -1642,7 +1631,7 @@ export default function JGoApp({
   const brandIntroText = buildBrandIntroText(selectedProduct);
 
   useEffect(() => {
-    setSizeAIResult(null);
+    deferClientUpdate(() => setSizeAIResult(null));
   }, [selectedProduct?.id]);
 
   const goToPrevImage = () => {
@@ -1725,7 +1714,7 @@ export default function JGoApp({
     setOrders(nextOrders);
   };
 
-  const loadOrdersForUser = async (user) => {
+  const loadOrdersForUser = async (user: JGoUser | null) => {
     if (ordersLoadingRef.current) return;
 
     if (!user?.email) {
@@ -1801,13 +1790,80 @@ export default function JGoApp({
       setOrders(formattedOrders);
     } catch (error) {
       console.error(error);
-      if (!String(error.message || "").includes("429")) {
-        alert(error.message);
+      const message = error instanceof Error ? error.message : "";
+      if (!message.includes("429")) {
+        alert(message || "讀取訂單失敗");
       }
     } finally {
       ordersLoadingRef.current = false;
     }
   };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get("payment") === "success") {
+      const savedUser = localStorage.getItem("jgo_current_user");
+
+      if (savedUser) {
+        try {
+          const user = JSON.parse(savedUser);
+          trackPurchaseSuccess(readLatestPurchaseFromStorage(user.email));
+        } catch {
+          trackPurchaseSuccess();
+        }
+      } else {
+        trackPurchaseSuccess();
+      }
+
+      deferClientUpdate(() => {
+        setPaymentMessage("付款成功，正在更新訂單...");
+        setTab("payment-result");
+        refreshProductsFromXano({ hasCache: true });
+
+        if (savedUser) {
+          const user = JSON.parse(savedUser);
+          setCurrentUser(user);
+
+          setTimeout(async () => {
+            await loadOrdersForUser(user);
+            setTab("orders");
+          }, 3500);
+        }
+      });
+
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+
+    const storeId = params.get("store_id") || params.get("CVSStoreID");
+    const storeName = params.get("store_name") || params.get("CVSStoreName");
+    const storeAddress = params.get("address") || params.get("CVSAddress");
+
+    if (storeId && storeName) {
+      const nextPickupStore = {
+        store_id: storeId,
+        store_name: storeName,
+        address: storeAddress || "",
+      };
+      deferClientUpdate(() => {
+        setPickupStore(nextPickupStore);
+        localStorage.setItem("jgo_pickup_store", JSON.stringify(nextPickupStore));
+        setDelivery("711");
+        setTab("checkout");
+      });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "orders" && currentUser?.email) {
+      deferClientUpdate(() => {
+        void loadOrdersForUser(currentUser);
+      });
+    }
+  }, [tab, currentUser?.email]);
 
   const loadAllOrdersForAdmin = async () => {
     if (!isAdmin) return;
@@ -1875,7 +1931,7 @@ export default function JGoApp({
       setOrders(formattedOrders);
     } catch (error) {
       console.error(error);
-      alert(error.message || "讀取全部訂單失敗");
+      alert(error instanceof Error ? error.message : "讀取全部訂單失敗");
     }
   };
 
@@ -1902,7 +1958,7 @@ export default function JGoApp({
       alert(`訂單已更新為：${nextStatus}`);
     } catch (error) {
       console.error(error);
-      alert(error.message || "更新出貨狀態失敗");
+      alert(error instanceof Error ? error.message : "更新出貨狀態失敗");
     }
   };
 
@@ -1980,7 +2036,7 @@ export default function JGoApp({
       alert("出貨資訊已儲存");
     } catch (error) {
       console.error(error);
-      alert(error.message || "更新物流失敗");
+      alert(error instanceof Error ? error.message : "更新物流失敗");
     }
   };
 
@@ -2185,7 +2241,7 @@ export default function JGoApp({
       form.submit();
     } catch (error) {
       console.error(error);
-      alert(`訂單建立失敗：${error.message}`);
+      alert(`訂單建立失敗：${error instanceof Error ? error.message : "未知錯誤"}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -2229,8 +2285,8 @@ export default function JGoApp({
             </button>
             <button onClick={() => setTab("cart")} className="relative rounded-full bg-neutral-900 p-3 text-white">
               <ShoppingBag size={20} />
-              {mounted && cartCount > 0 && (
-                <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-xs">{cartCount}</span>
+              {mounted && cart.length > 0 && (
+                <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-xs">{cart.length}</span>
               )}
             </button>
           </div>
@@ -3494,7 +3550,7 @@ export default function JGoApp({
                           }
                         } catch (error) {
                           console.error(error);
-                          alert(error.message || "開啟門市地圖失敗");
+                          alert(error instanceof Error ? error.message : "開啟門市地圖失敗");
                         }
                       }}
                       className="mt-2 rounded-2xl bg-neutral-900"
@@ -3936,7 +3992,7 @@ export default function JGoApp({
                                   value={
                                     trackingForms[order.id]?.shippedAt
                                     ?? toDatetimeLocalValue(order.shippedAt)
-                                    ?? toDatetimeLocalValue(Date.now())
+                                    ?? defaultShippedAtValue
                                   }
                                   onChange={(e) => updateTrackingForm(order.id, "shippedAt", e.target.value)}
                                   className="h-11 w-full rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"

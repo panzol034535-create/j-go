@@ -103,9 +103,13 @@ async function runStockSync(productId: number, button?: HTMLButtonElement | null
     await waitForNextTick();
     assertSyncNotTimedOut(deadline);
 
-    const { variant_stock: variantStock } = extractSyncModeVariantStock();
+    const { variant_stock: variantStock, current_jpy_price: currentJpyPrice } =
+      extractSyncModeVariantStock();
 
     console.log("FINAL VARIANT STOCK", variantStock);
+    if (currentJpyPrice) {
+      console.log("SYNC CURRENT JPY PRICE", currentJpyPrice);
+    }
 
     assertSyncNotTimedOut(deadline);
 
@@ -121,6 +125,9 @@ async function runStockSync(productId: number, button?: HTMLButtonElement | null
         payload: {
           product_id: productId,
           variant_stock: variantStock,
+          ...(currentJpyPrice && currentJpyPrice > 0
+            ? { current_jpy_price: currentJpyPrice }
+            : {}),
         },
       }),
       new Promise<BackgroundResponse>((_, reject) => {

@@ -1464,6 +1464,7 @@ export function isZozoProductPage(): boolean {
 export type CurrentColorVariantStockResult = {
   color: string | null;
   variant_stock: VariantStock[];
+  current_jpy_price?: number;
   sizeBlockText?: string;
 };
 
@@ -1650,9 +1651,14 @@ export function extractSyncModeVariantStock(): CurrentColorVariantStockResult {
   console.log("PARSED COLOR STOCK", variant_stock);
   console.log("FINAL VARIANT STOCK", variant_stock);
 
+  const jsonLd = findProductJsonLd();
+  const current_jpy_price = extractPrice(jsonLd);
+  console.log("SYNC CURRENT JPY PRICE", current_jpy_price);
+
   return {
     color: variant_stock[0]?.color ?? null,
     variant_stock,
+    ...(current_jpy_price > 0 ? { current_jpy_price } : {}),
     sizeBlockText: blockText,
   };
 }

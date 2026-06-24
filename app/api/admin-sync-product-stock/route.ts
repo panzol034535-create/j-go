@@ -7,6 +7,12 @@ import {
 } from "@/lib/auth/require-admin";
 import { deriveVariantsListUrl } from "@/lib/products/merge-product-variants";
 import {
+  calculateSyncTwdPrice,
+  fetchPricingSettings,
+  parseCurrentJpyPrice,
+  resolveLastStockStatusFromVariants,
+} from "@/lib/products/sync-product-price";
+import {
   normalizeColor,
   normalizeSize,
   normalizeVariantStockEntries,
@@ -19,9 +25,13 @@ const DEFAULT_PRODUCTS_URL =
 const DEFAULT_UPDATE_VARIANT_STOCK_URL =
   "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-variant-stock";
 
+const DEFAULT_UPDATE_PRODUCT_STOCK_URL =
+  "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-product-stock";
+
 type SyncRequestBody = {
   product_id?: number;
   variant_stock?: VariantStockEntry[];
+  current_jpy_price?: number;
 };
 
 type MatchedVariantUpdate = {
@@ -161,6 +171,50 @@ async function updateVariantStock(
   };
 }
 
+async function updateProductPriceAndStatus(
+  updateUrl: string,
+  productId: number,
+  currentJpyPrice: number,
+  normalizedVariantStock: VariantStockEntry[]
+): Promise<{ ok: boolean; newPrice: number; body: string }> {
+  const settings = await fetchPricingSettings();
+  const newPrice = calculateSyncTwdPrice(currentJpyPrice, settings);
+  const lastStockStatus = resolveLastStockStatusFromVariants(normalizedVariantStock);
+
+  console.log("SYNC PRICE", {
+    product_id: productId,
+    current_jpy_price: currentJpyPrice,
+    newPrice,
+  });
+
+  const payload = {
+    product_id: productId,
+    current_jpy_price: currentJpyPrice,
+    jpy_price: currentJpyPrice,
+    price: newPrice,
+    last_price_jpy: currentJpyPrice,
+    last_stock_status: lastStockStatus,
+    check_status: "ok",
+  };
+
+  console.log("UPDATE PRODUCT STOCK PAYLOAD", payload);
+
+  const response = await fetch(updateUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const body = await response.text();
+  console.log("XANO UPDATE PRODUCT STOCK RESPONSE", productId, response.status, body);
+
+  return {
+    ok: response.ok,
+    newPrice,
+    body,
+  };
+}
+
 export async function POST(request: NextRequest) {
   const admin = await requireAdminUser();
   if (!admin) {
@@ -188,8 +242,12 @@ export async function POST(request: NextRequest) {
     return badRequestResponse("未取得可同步的庫存資料");
   }
 
-  const updateUrl =
+  const currentJpyPrice = parseCurrentJpyPrice(body.current_jpy_price);
+
+  const updateVariantUrl =
     process.env.XANO_UPDATE_VARIANT_STOCK_URL || DEFAULT_UPDATE_VARIANT_STOCK_URL;
+  const updateProductUrl =
+    process.env.XANO_UPDATE_PRODUCT_STOCK_URL || DEFAULT_UPDATE_PRODUCT_STOCK_URL;
 
   const productsUrl = process.env.XANO_PRODUCTS_URL || DEFAULT_PRODUCTS_URL;
   const variantsUrl =
@@ -209,7 +267,7 @@ export async function POST(request: NextRequest) {
     const failures: string[] = [];
 
     for (const update of updates) {
-      const result = await updateVariantStock(updateUrl, update);
+      const result = await updateVariantStock(updateVariantUrl, update);
       if (result.ok) {
         syncedCount += 1;
         continue;
@@ -226,12 +284,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let priceSynced = false;
+    let syncedPrice: number | null = null;
+    let priceSyncError: string | undefined;
+
+    if (currentJpyPrice) {
+      const priceResult = await updateProductPriceAndStatus(
+        updateProductUrl,
+        productId,
+        currentJpyPrice,
+        normalizedVariantStock
+      );
+
+      if (priceResult.ok) {
+        priceSynced = true;
+        syncedPrice = priceResult.newPrice;
+      } else {
+        priceSyncError = priceResult.body || "更新商品價格失敗";
+        console.warn("SYNC PRICE UPDATE FAILED", priceSyncError);
+      }
+    } else {
+      console.log("SYNC PRICE SKIPPED", {
+        product_id: productId,
+        current_jpy_price: body.current_jpy_price ?? null,
+      });
+    }
+
     return NextResponse.json({
       success: true,
       synced_count: syncedCount,
       failed_count: failures.length,
       failures: failures.length > 0 ? failures : undefined,
-      message: `已同步 ${syncedCount} 個尺寸庫存`,
+      price_synced: priceSynced,
+      current_jpy_price: currentJpyPrice ?? undefined,
+      price: syncedPrice ?? undefined,
+      price_sync_error: priceSyncError,
+      message:
+        priceSynced && syncedPrice != null
+          ? `已同步 ${syncedCount} 個尺寸庫存，日幣 ${currentJpyPrice} → 台幣 ${syncedPrice}`
+          : `已同步 ${syncedCount} 個尺寸庫存`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "同步庫存失敗";

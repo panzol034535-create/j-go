@@ -68,3 +68,5 @@ export function formatXanoProducts(productList: Record<string, unknown>[]) {
     };
   });
 }
+
+export type FormattedXanoProduct = ReturnType<typeof formatXanoProducts>[number];

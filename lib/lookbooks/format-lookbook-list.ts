@@ -20,3 +20,5 @@ export function formatLookbookList(list: Record<string, unknown>[]) {
     };
   });
 }
+
+export type FormattedLookbook = ReturnType<typeof formatLookbookList>[number];

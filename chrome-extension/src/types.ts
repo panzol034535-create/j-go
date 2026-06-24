@@ -53,6 +53,7 @@ export type ImportProductResponse = {
 export type SyncProductStockPayload = {
   product_id: number;
   variant_stock: VariantStock[];
+  current_jpy_price?: number;
 };
 
 export type SyncProductStockResponse = {
@@ -60,6 +61,10 @@ export type SyncProductStockResponse = {
   error?: string;
   synced_count?: number;
   message?: string;
+  price_synced?: boolean;
+  current_jpy_price?: number;
+  price?: number;
+  price_sync_error?: string;
 };
 
 export type BackgroundMessage =

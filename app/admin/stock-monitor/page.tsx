@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { deferClientUpdate } from "@/lib/react/defer-client-update";
 import { AdminShell } from "@/components/admin/AdminShell";
 import type { StockMonitorProduct } from "@/lib/types/stock-monitor";
 
@@ -113,7 +114,9 @@ export default function StockMonitorPage() {
   }, []);
 
   useEffect(() => {
-    void loadProducts();
+    deferClientUpdate(() => {
+      void loadProducts();
+    });
   }, [loadProducts]);
 
   const handleCheckNow = async (productId: number) => {
