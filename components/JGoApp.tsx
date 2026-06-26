@@ -301,6 +301,33 @@ const XANO_ADMIN_UPDATE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi
 const XANO_ADMIN_DELETE_PRODUCT_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-delete-product";
 const XANO_RECALCULATE_PRODUCTS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/admin-recalculate-all-products";
 
+const FREE_SHIPPING_THRESHOLD = 3500;
+const STANDARD_SHIPPING_FEE = 60;
+
+function resolveShippingFee(subtotal: number): number {
+  if (subtotal <= 0) {
+    return 0;
+  }
+
+  if (subtotal >= FREE_SHIPPING_THRESHOLD) {
+    return 0;
+  }
+
+  return STANDARD_SHIPPING_FEE;
+}
+
+function getFreeShippingHint(subtotal: number): string | null {
+  if (subtotal <= 0) {
+    return null;
+  }
+
+  if (subtotal >= FREE_SHIPPING_THRESHOLD) {
+    return "已達免運門檻";
+  }
+
+  return `再買 ${formatPrice(FREE_SHIPPING_THRESHOLD - subtotal)} 免運`;
+}
+
 const EMPTY_INITIAL_RANKINGS: InitialRankings = {
   salesRankings: [],
   favoriteProductRankings: [],
@@ -1640,7 +1667,7 @@ export default function JGoApp({
   const homeBrandOptions = brandOptions.filter((brand) => brand !== "all").slice(0, 8);
   const featuredProduct = catalogFilteredProducts[0] || products[0];
 
-  const shipping = subtotal > 0 ? 60 : 0;
+  const shipping = resolveShippingFee(subtotal);
   const discountAmount = appliedCoupon?.discount_amount ?? 0;
   const discountedSubtotal = appliedCoupon
     ? Math.max(0, subtotal - discountAmount)
@@ -5429,6 +5456,8 @@ function PriceBox({
   payableTotal: number;
   appliedCoupon?: AppliedCoupon | null;
 }) {
+  const freeShippingHint = getFreeShippingHint(subtotal);
+
   return (
     <Card className="rounded-3xl border-neutral-100 bg-neutral-50">
       <CardContent className="space-y-2 p-4 text-sm">
@@ -5448,6 +5477,9 @@ function PriceBox({
               <span className="font-black">{formatPrice(discountedSubtotal)}</span>
             </div>
           </>
+        ) : null}
+        {freeShippingHint ? (
+          <p className="text-xs font-bold text-emerald-600">{freeShippingHint}</p>
         ) : null}
         <div className="flex justify-between"><span>運費</span><span>{formatPrice(shipping)}</span></div>
         <div className="flex justify-between border-t pt-2 text-base font-black"><span>總計</span><span>{formatPrice(payableTotal)}</span></div>
