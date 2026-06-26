@@ -319,6 +319,86 @@ function getServerMountedSnapshot() {
   return false;
 }
 
+const APPLIED_COUPON_STORAGE_KEY = "jgo_applied_coupon";
+const COUPON_CODE_INPUT_STORAGE_KEY = "jgo_coupon_code_input";
+
+type StoredAppliedCouponPayload = AppliedCoupon & {
+  subtotal_at_apply: number;
+};
+
+function persistAppliedCoupon(coupon: AppliedCoupon, subtotalAtApply: number) {
+  if (typeof window === "undefined") return;
+
+  const payload: StoredAppliedCouponPayload = {
+    ...coupon,
+    subtotal_at_apply: subtotalAtApply,
+  };
+  localStorage.setItem(APPLIED_COUPON_STORAGE_KEY, JSON.stringify(payload));
+  localStorage.setItem(COUPON_CODE_INPUT_STORAGE_KEY, coupon.code);
+}
+
+function clearAppliedCouponStorage() {
+  if (typeof window === "undefined") return;
+
+  localStorage.removeItem(APPLIED_COUPON_STORAGE_KEY);
+  localStorage.removeItem(COUPON_CODE_INPUT_STORAGE_KEY);
+}
+
+function readStoredAppliedCoupon(): { coupon: AppliedCoupon; subtotalAtApply: number } | null {
+  if (typeof window === "undefined") return null;
+
+  const raw = localStorage.getItem(APPLIED_COUPON_STORAGE_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as StoredAppliedCouponPayload;
+    const subtotalAtApply = Number(parsed.subtotal_at_apply);
+    const discountAmount = Number(parsed.discount_amount);
+    const finalTotal = Number(parsed.final_total);
+    const couponId = Number(parsed.coupon_id);
+
+    if (
+      !parsed.code ||
+      !couponId ||
+      !Number.isFinite(subtotalAtApply) ||
+      !Number.isFinite(discountAmount) ||
+      !Number.isFinite(finalTotal)
+    ) {
+      return null;
+    }
+
+    return {
+      coupon: {
+        coupon_id: couponId,
+        code: String(parsed.code),
+        discount_amount: discountAmount,
+        final_total: finalTotal,
+        message: String(parsed.message ?? ""),
+      },
+      subtotalAtApply,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isStoredCouponValid(
+  coupon: AppliedCoupon,
+  subtotalAtApply: number,
+  currentSubtotal: number
+): boolean {
+  if (currentSubtotal <= 0) {
+    return false;
+  }
+
+  if (subtotalAtApply !== currentSubtotal) {
+    return false;
+  }
+
+  const expectedFinalTotal = Math.max(0, currentSubtotal - coupon.discount_amount);
+  return coupon.final_total === expectedFinalTotal;
+}
+
 export default function JGoApp({
   initialProducts,
   initialLookbooks,
@@ -439,6 +519,7 @@ export default function JGoApp({
   const [couponError, setCouponError] = useState("");
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const cartCouponResetRef = useRef(true);
+  const couponRestoredRef = useRef(false);
   const [lookbookForm, setLookbookForm] = useState({
     title: "",
     image: "",
@@ -1570,11 +1651,39 @@ export default function JGoApp({
 
     setAppliedCoupon(null);
     setCouponError("");
+    clearAppliedCouponStorage();
   }, [cart]);
+
+  useEffect(() => {
+    if (!mounted || couponRestoredRef.current) return;
+
+    couponRestoredRef.current = true;
+
+    queueMicrotask(() => {
+      const storedCode = localStorage.getItem(COUPON_CODE_INPUT_STORAGE_KEY);
+      const stored = readStoredAppliedCoupon();
+
+      if (stored && isStoredCouponValid(stored.coupon, stored.subtotalAtApply, subtotal)) {
+        setAppliedCoupon(stored.coupon);
+        setCouponCodeInput(stored.coupon.code);
+        return;
+      }
+
+      if (stored) {
+        clearAppliedCouponStorage();
+        setAppliedCoupon(null);
+      }
+
+      if (storedCode) {
+        setCouponCodeInput(storedCode);
+      }
+    });
+  }, [mounted, subtotal]);
 
   const removeAppliedCoupon = () => {
     setAppliedCoupon(null);
     setCouponError("");
+    clearAppliedCouponStorage();
   };
 
   const applyCoupon = async () => {
@@ -1582,12 +1691,14 @@ export default function JGoApp({
     if (!code) {
       setCouponError("請輸入折扣碼");
       setAppliedCoupon(null);
+      clearAppliedCouponStorage();
       return;
     }
 
     if (subtotal <= 0) {
       setCouponError("購物車是空的");
       setAppliedCoupon(null);
+      clearAppliedCouponStorage();
       return;
     }
 
@@ -1615,6 +1726,7 @@ export default function JGoApp({
       if (!response.ok) {
         setCouponError(data.message || data.error || "折價券無法使用");
         setAppliedCoupon(null);
+        clearAppliedCouponStorage();
         return;
       }
 
@@ -1625,20 +1737,26 @@ export default function JGoApp({
       if (!couponId || Number.isNaN(discountAmount) || Number.isNaN(finalTotal)) {
         setCouponError(data.message || data.error || "折價券無法使用");
         setAppliedCoupon(null);
+        clearAppliedCouponStorage();
         return;
       }
 
-      setAppliedCoupon({
+      const nextCoupon: AppliedCoupon = {
         coupon_id: couponId,
         code: String(data.code ?? data.coupon_code ?? code),
         discount_amount: discountAmount,
         final_total: finalTotal,
         message: String(data.message ?? ""),
-      });
+      };
+
+      setAppliedCoupon(nextCoupon);
+      setCouponCodeInput(nextCoupon.code);
+      persistAppliedCoupon(nextCoupon, subtotal);
       setCouponError("");
     } catch {
       setCouponError("網路錯誤，請稍後再試");
       setAppliedCoupon(null);
+      clearAppliedCouponStorage();
     } finally {
       setIsApplyingCoupon(false);
     }
@@ -2560,6 +2678,7 @@ export default function JGoApp({
       setAppliedCoupon(null);
       setCouponCodeInput("");
       setCouponError("");
+      clearAppliedCouponStorage();
 
       const form = document.createElement("form");
       form.method = "POST";
