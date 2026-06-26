@@ -5,7 +5,7 @@ import {
   serverErrorResponse,
   unauthorizedResponse,
 } from "@/lib/auth/require-admin";
-import { runStockCheck } from "@/lib/stock-monitor/check-product";
+import { runStockCheck, buildStockMonitorUpdatePayload, parseCheckPriceJpy } from "@/lib/stock-monitor/check-product";
 import {
   getCheckSuccessMessage,
   normalizeStockMonitorProduct,
@@ -90,13 +90,12 @@ export async function POST(request: NextRequest) {
 
     const checkRecord = await checkResponse.json();
 
-    const updatePayload = {
-      product_id: productId,
-      last_checked_at: checkedAt,
-      last_price_jpy: checkResult.price_jpy,
-      last_stock_status: checkResult.stock_status,
-      check_status: checkResult.check_status,
-    };
+    const validPriceJpy = parseCheckPriceJpy(checkResult.price_jpy);
+    const updatePayload = buildStockMonitorUpdatePayload({
+      productId,
+      checkedAt,
+      checkResult,
+    });
 
     const updateResponse = await fetch(updateUrl, {
       method: "POST",
@@ -118,7 +117,7 @@ export async function POST(request: NextRequest) {
       ) ?? {
         ...product,
         last_checked_at: checkedAt,
-        last_price_jpy: checkResult.price_jpy,
+        last_price_jpy: validPriceJpy ?? product.last_price_jpy,
         last_stock_status: checkResult.stock_status,
         check_status: checkResult.check_status,
       };
@@ -130,7 +129,7 @@ export async function POST(request: NextRequest) {
       product: updatedProduct,
       result: {
         check_status: checkResult.check_status,
-        last_price_jpy: checkResult.price_jpy,
+        ...(validPriceJpy !== null ? { last_price_jpy: validPriceJpy } : {}),
         last_stock_status: checkResult.stock_status,
         last_checked_at: checkedAt,
       },

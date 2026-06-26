@@ -27,6 +27,14 @@ export type JGoProduct = FormattedXanoProduct;
 
 export type JGoLookbook = FormattedLookbook;
 
+export type AppliedCoupon = {
+  coupon_id: number;
+  code: string;
+  discount_amount: number;
+  final_total: number;
+  message: string;
+};
+
 export type JGoOrder = {
   id: number | string;
   items?: unknown[];

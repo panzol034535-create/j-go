@@ -8,6 +8,12 @@ import {
   enrichDraftProductsWithCatalog,
   normalizeDraftProducts,
 } from "@/lib/products/normalize-draft-product";
+import {
+  fetchRevalidatedJson,
+  fetchXanoJson,
+  isXanoFetchError,
+  xanoErrorResponse,
+} from "@/lib/server/fetch-revalidated";
 
 const DEFAULT_PRODUCTS_URL =
   "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/products";
@@ -38,18 +44,13 @@ async function fetchProductsCatalog(): Promise<Record<string, unknown>[]> {
   const productsUrl = process.env.XANO_PRODUCTS_URL || DEFAULT_PRODUCTS_URL;
 
   try {
-    const response = await fetch(`${productsUrl}?t=${Date.now()}`, {
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      console.warn("DRAFT PRODUCTS CATALOG FETCH FAILED", response.status);
-      return [];
-    }
-
-    const data = await response.json();
+    const data = await fetchRevalidatedJson(productsUrl);
     return toRecordArray(data);
   } catch (error) {
+    if (isXanoFetchError(error) && error.status === 429) {
+      throw error;
+    }
+
     console.warn("DRAFT PRODUCTS CATALOG FETCH ERROR", error);
     return [];
   }
@@ -67,16 +68,7 @@ export async function GET() {
   }
 
   try {
-    const response = await fetch(`${draftUrl}?t=${Date.now()}`, {
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return serverErrorResponse(`讀取 Draft 商品失敗：${errorText}`);
-    }
-
-    const data = await response.json();
+    const data = await fetchXanoJson(draftUrl, { revalidate: false });
     const rawRecords = toRecordArray(data);
     const normalizedDrafts = normalizeDraftProducts(data);
     const catalog = await fetchProductsCatalog();
@@ -102,6 +94,10 @@ export async function GET() {
 
     return NextResponse.json({ products });
   } catch (error) {
+    if (isXanoFetchError(error)) {
+      return xanoErrorResponse(error, "讀取 Draft 商品失敗");
+    }
+
     const message = error instanceof Error ? error.message : "讀取失敗";
     return serverErrorResponse(message);
   }

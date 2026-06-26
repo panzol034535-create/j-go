@@ -8,13 +8,31 @@ export type PricingSettings = {
   profit_rate: number;
 };
 
+export type ProductStockStatus = "in_stock" | "out_of_stock" | "unknown";
+
+/**
+ * Accepts only positive integer JPY prices from sync payloads.
+ * Returns null for undefined, null, "", whitespace, 0, NaN, or non-numeric values.
+ */
 export function parseCurrentJpyPrice(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "string" && value.trim() === "") {
+    return null;
+  }
+
   const parsed = Math.round(Number(value));
-  if (Number.isNaN(parsed) || parsed <= 0) {
+  if (!Number.isFinite(parsed) || parsed <= 0) {
     return null;
   }
 
   return parsed;
+}
+
+export function isValidCurrentJpyPrice(value: unknown): boolean {
+  return parseCurrentJpyPrice(value) !== null;
 }
 
 export function calculateSyncTwdPrice(
@@ -26,7 +44,7 @@ export function calculateSyncTwdPrice(
 
 export function resolveLastStockStatusFromVariants(
   entries: VariantStockEntry[]
-): "in_stock" | "out_of_stock" | "unknown" {
+): ProductStockStatus {
   if (entries.length === 0) {
     return "unknown";
   }
@@ -81,4 +99,44 @@ export async function fetchPricingSettings(): Promise<PricingSettings> {
     console.warn("SYNC PRICE SETTINGS FETCH ERROR", error);
     return normalizePricingSettings(null);
   }
+}
+
+/**
+ * Xano POST update-product-stock — price sync payload.
+ * Returns null when TWD price would be <= 0 so callers never send price: 0.
+ */
+export function buildProductPriceUpdatePayload(options: {
+  productId: number;
+  currentJpyPrice: number;
+  settings: PricingSettings;
+  lastStockStatus: ProductStockStatus;
+}): Record<string, unknown> | null {
+  const twdPrice = calculateSyncTwdPrice(options.currentJpyPrice, options.settings);
+  if (twdPrice <= 0) {
+    return null;
+  }
+
+  return {
+    product_id: options.productId,
+    current_jpy_price: options.currentJpyPrice,
+    jpy_price: options.currentJpyPrice,
+    last_price_jpy: options.currentJpyPrice,
+    price: twdPrice,
+    last_stock_status: options.lastStockStatus,
+    check_status: "ok",
+  };
+}
+
+/**
+ * Xano POST update-product-stock — stock-only payload (no price fields).
+ */
+export function buildProductStockStatusPayload(
+  productId: number,
+  lastStockStatus: ProductStockStatus
+): Record<string, unknown> {
+  return {
+    product_id: productId,
+    last_stock_status: lastStockStatus,
+    check_status: "ok",
+  };
 }

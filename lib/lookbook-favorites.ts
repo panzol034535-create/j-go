@@ -1,4 +1,6 @@
-const STORAGE_KEY = "jgo_favorite_lookbooks";
+export const GUEST_FAVORITE_LOOKBOOK_IDS_KEY = "jgo_favorite_lookbook_ids_guest";
+
+/** Guest vs signed-in Clerk users use separate localStorage keys. Load only after client mount. */
 
 function normalizeFavoriteLookbookIds(ids: unknown): number[] {
   if (!Array.isArray(ids)) {
@@ -14,13 +16,26 @@ function normalizeFavoriteLookbookIds(ids: unknown): number[] {
   );
 }
 
-export function loadFavoriteLookbookIds(): number[] {
+export function getFavoriteLookbookIdsStorageKey(userId?: string | null): string {
+  const normalized = String(userId || "").trim();
+  if (!normalized) {
+    return GUEST_FAVORITE_LOOKBOOK_IDS_KEY;
+  }
+
+  return `jgo_favorite_lookbook_ids_${normalized}`;
+}
+
+export function loadFavoriteLookbookIds(storageKeyOrUserId?: string | null): number[] {
   if (typeof window === "undefined") {
     return [];
   }
 
+  const storageKey = storageKeyOrUserId?.startsWith("jgo_favorite_lookbook_ids_")
+    ? storageKeyOrUserId
+    : getFavoriteLookbookIdsStorageKey(storageKeyOrUserId);
+
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) {
       return [];
     }
@@ -31,12 +46,16 @@ export function loadFavoriteLookbookIds(): number[] {
   }
 }
 
-export function saveFavoriteLookbookIds(ids: number[]): void {
+export function saveFavoriteLookbookIds(ids: number[], storageKeyOrUserId?: string | null): void {
   if (typeof window === "undefined") {
     return;
   }
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeFavoriteLookbookIds(ids)));
+  const storageKey = storageKeyOrUserId?.startsWith("jgo_favorite_lookbook_ids_")
+    ? storageKeyOrUserId
+    : getFavoriteLookbookIdsStorageKey(storageKeyOrUserId);
+
+  localStorage.setItem(storageKey, JSON.stringify(normalizeFavoriteLookbookIds(ids)));
 }
 
 export function toggleFavoriteLookbookId(ids: number[], lookbookId: number): number[] {

@@ -4,6 +4,11 @@ import {
   serverErrorResponse,
   unauthorizedResponse,
 } from "@/lib/auth/require-admin";
+import {
+  fetchXanoJson,
+  isXanoFetchError,
+  xanoErrorResponse,
+} from "@/lib/server/fetch-revalidated";
 import { normalizeStockMonitorProducts } from "@/lib/stock-monitor/normalize-product";
 
 export async function GET() {
@@ -18,20 +23,15 @@ export async function GET() {
   }
 
   try {
-    const response = await fetch(`${listUrl}?t=${Date.now()}`, {
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return serverErrorResponse(`讀取監控商品失敗：${errorText}`);
-    }
-
-    const data = await response.json();
+    const data = await fetchXanoJson(listUrl, { revalidate: false });
     const products = normalizeStockMonitorProducts(data);
 
     return NextResponse.json({ products });
   } catch (error) {
+    if (isXanoFetchError(error)) {
+      return xanoErrorResponse(error, "讀取監控商品失敗");
+    }
+
     const message = error instanceof Error ? error.message : "讀取失敗";
     return serverErrorResponse(message);
   }

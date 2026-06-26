@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { badRequestResponse, serverErrorResponse } from "@/lib/auth/require-admin";
 
 const DEFAULT_UPDATE_PRODUCT_FAVORITE_COUNT_URL =
@@ -12,6 +13,7 @@ function resolveUpdateProductFavoriteCountUrl(): string | null {
 type FavoriteCountBody = {
   product_id?: number;
   action?: string;
+  delta?: number;
 };
 
 export async function POST(request: NextRequest) {
@@ -33,19 +35,22 @@ export async function POST(request: NextRequest) {
     return badRequestResponse('action 必須是 "add" 或 "remove"');
   }
 
-  console.log("PRODUCT FAVORITE COUNT BODY", body);
-
   const updateUrl = resolveUpdateProductFavoriteCountUrl();
   if (!updateUrl) {
     return serverErrorResponse("XANO_UPDATE_PRODUCT_FAVORITE_COUNT_URL 未設定");
   }
 
-  console.log("XANO_UPDATE_PRODUCT_FAVORITE_COUNT_URL", updateUrl);
-
-  const xanoPayload = {
+  const xanoPayload: Record<string, unknown> = {
     product_id: productId,
     action,
   };
+
+  if (action === "add" && body.delta != null) {
+    xanoPayload.delta = body.delta;
+  }
+
+  // Xano update-product-favorite-count: action "add" → favorite_count += input.delta;
+  // J-GO 前端取消收藏不呼叫此 API；action "remove" 不應扣減 favorite_count。
 
   try {
     const response = await fetch(updateUrl, {
@@ -56,6 +61,17 @@ export async function POST(request: NextRequest) {
 
     const text = await response.text();
 
+    if (response.status === 429) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "目前操作太頻繁，請稍後再試收藏。",
+          status: 429,
+        },
+        { status: 429 }
+      );
+    }
+
     if (!response.ok) {
       console.error("XANO PRODUCT FAVORITE ERROR", response.status, text);
       return NextResponse.json(
@@ -65,7 +81,7 @@ export async function POST(request: NextRequest) {
           status: response.status,
           xanoResponse: text,
         },
-        { status: 500 }
+        { status: response.status >= 400 && response.status < 600 ? response.status : 500 }
       );
     }
 
@@ -77,6 +93,10 @@ export async function POST(request: NextRequest) {
         xanoResult = {};
       }
     }
+
+    revalidatePath("/");
+    revalidatePath("/api/products");
+    revalidatePath("/api/rankings/favorites");
 
     return NextResponse.json({
       success: true,

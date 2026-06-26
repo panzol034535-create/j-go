@@ -1,5 +1,31 @@
-/** Frontend-only increment when a user adds an item to「我的收藏」. */
+/** Delta sent to Xano when a user adds an item to「我的收藏」. */
 export const FRONTEND_FAVORITE_ADD_INCREMENT = 2;
+
+export class FavoriteCountSyncError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "FavoriteCountSyncError";
+    this.status = status;
+  }
+}
+
+export function getFavoriteCountErrorMessage(error: unknown): string {
+  if (error instanceof FavoriteCountSyncError) {
+    if (error.status === 429) {
+      return "目前操作太頻繁，請稍後再試收藏。";
+    }
+
+    return error.message;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return "更新收藏數失敗，請稍後再試。";
+}
 
 export function getFavoriteCount(value: unknown): number {
   const count = Number(value);
@@ -37,13 +63,16 @@ function resolveFavoriteCountFromResponse(
 
 export async function syncProductFavoriteCount(
   productId: number,
-  action: "add" | "remove",
-  fallbackCount = 0
+  action: "add",
+  options: { delta?: number; fallbackCount?: number } = {}
 ): Promise<FavoriteSyncResult> {
+  const delta = options.delta ?? FRONTEND_FAVORITE_ADD_INCREMENT;
+  const fallbackCount = Number(options.fallbackCount ?? 0);
+
   const response = await fetch("/api/products/favorite-count", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ product_id: productId, action }),
+    body: JSON.stringify({ product_id: productId, action: "add", delta }),
   });
 
   let data: Record<string, unknown> = {};
@@ -58,7 +87,7 @@ export async function syncProductFavoriteCount(
       typeof data.message === "string" && data.message
         ? data.message
         : `更新商品收藏數失敗（${response.status}）`;
-    throw new Error(message);
+    throw new FavoriteCountSyncError(message, response.status);
   }
 
   return {
@@ -68,13 +97,16 @@ export async function syncProductFavoriteCount(
 
 export async function syncLookbookFavoriteCount(
   lookbookId: number,
-  action: "add" | "remove",
-  fallbackCount = 0
+  action: "add",
+  options: { delta?: number; fallbackCount?: number } = {}
 ): Promise<FavoriteSyncResult> {
+  const delta = options.delta ?? FRONTEND_FAVORITE_ADD_INCREMENT;
+  const fallbackCount = Number(options.fallbackCount ?? 0);
+
   const response = await fetch("/api/lookbooks/favorite-count", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ lookbook_id: lookbookId, action }),
+    body: JSON.stringify({ lookbook_id: lookbookId, action: "add", delta }),
   });
 
   let data: Record<string, unknown> = {};
@@ -89,7 +121,7 @@ export async function syncLookbookFavoriteCount(
       typeof data.message === "string" && data.message
         ? data.message
         : `更新穿搭收藏數失敗（${response.status}）`;
-    throw new Error(message);
+    throw new FavoriteCountSyncError(message, response.status);
   }
 
   return {

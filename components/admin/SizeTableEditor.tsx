@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { deferClientUpdate } from "@/lib/react/defer-client-update";
 import {
   SIZE_TABLE_FIELD_ORDER,
   type ZozoSizeTableRow,
@@ -39,10 +38,8 @@ export function SizeTableEditor({ productId, initialRows = [], onSaved }: SizeTa
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    deferClientUpdate(() => {
-      setRows(initialRows.length > 0 ? initialRows : [createEmptyRow()]);
-      setMessage("");
-    });
+    setRows(initialRows.length > 0 ? initialRows : [createEmptyRow()]);
+    setMessage("");
   }, [productId, initialRows]);
 
   const updateCell = (rowIndex: number, field: keyof ZozoSizeTableRow, value: string) => {

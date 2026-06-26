@@ -1653,7 +1653,7 @@ export function extractSyncModeVariantStock(): CurrentColorVariantStockResult {
 
   const jsonLd = findProductJsonLd();
   const current_jpy_price = extractPrice(jsonLd);
-  console.log("SYNC CURRENT JPY PRICE", current_jpy_price);
+  console.log("SYNC CURRENT JPY PRICE", current_jpy_price > 0 ? current_jpy_price : "skipped");
 
   return {
     color: variant_stock[0]?.color ?? null,

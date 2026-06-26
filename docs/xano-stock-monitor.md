@@ -41,7 +41,16 @@
 
 ### POST update-product-stock
 
-Body：
+此 endpoint 會被兩種流程呼叫：
+
+1. **ZOZO 擴充功能同步庫存**（`/api/admin-sync-product-stock`）
+2. **Stock Monitor Check Now**（`/api/stock-monitor/check`）
+
+請在 Xano 以「**只更新 request body 有帶的欄位**」方式實作，**不要**把缺少的 `price` / `jpy_price` 自動設成 `0`。
+
+#### A. 有有效日幣價格（`current_jpy_price > 0`）
+
+J-GO 才會計算台幣售價並送出以下欄位：
 
 ```json
 {
@@ -51,14 +60,49 @@ Body：
   "price": 3004,
   "last_price_jpy": 8900,
   "last_stock_status": "in_stock",
-  "check_status": "ok",
-  "last_checked_at": "2026-06-12T10:00:00.000Z"
+  "check_status": "ok"
 }
 ```
 
-- `current_jpy_price`：ZOZO 同步庫存時抓到的目前日幣售價（選填；無效時只更新庫存）
-- `price`：由 Xano `settings.jpy_rate × settings.profit_rate` 計算後四捨五入的台幣售價
-- 此 endpoint 只應更新價格／監控相關欄位，不要覆寫 `name_zh`、`images`、`description` 等
+- `current_jpy_price`：ZOZO 同步庫存時從 JSON-LD 或購買區塊解析（選填；無效時 **不送任何價格欄位**）
+- `jpy_price` / `last_price_jpy`：與 `current_jpy_price` 相同
+- `price`：由 J-GO 以 `settings.jpy_rate × settings.profit_rate` 計算後四捨五入；若換算結果 `<= 0` 則 **整包價格欄位都不送**
+- `XANO_SETTINGS_URL` 讀不到時，J-GO 使用預設 `0.25 × 1.35`，但仍需有效 `current_jpy_price` 才更新價格
+
+#### B. 只同步庫存（無有效 `current_jpy_price`）
+
+J-GO 只更新 variant 庫存 + 商品層監控狀態，**payload 不含任何價格欄位**：
+
+```json
+{
+  "product_id": 1,
+  "last_stock_status": "in_stock",
+  "check_status": "ok"
+}
+```
+
+#### C. Stock Monitor Check Now（無有效 `price_jpy`）
+
+`/api/stock-monitor/check` 仍會寫入 `create-stock-check`（`price_jpy` 可為 `null`），但 `update-product-stock` 只送：
+
+```json
+{
+  "product_id": 1,
+  "last_checked_at": "2026-06-12T10:00:00.000Z",
+  "last_stock_status": "unknown",
+  "check_status": "requires_browser_check"
+}
+```
+
+僅當 `price_jpy > 0` 時才額外送 `last_price_jpy`。
+
+#### Xano 設定建議（避免 price 被寫成 0）
+
+- API stack 使用 **Edit Record → 只 map input 有值的欄位**，不要用「Set `price` = `input.price` 或 0」這類 fallback
+- 若使用 Function 組 payload，對 `price` / `jpy_price` / `last_price_jpy` 做 `if ($input.price > 0)` 才寫入
+- 缺少價格欄位時，**保留資料庫原有售價**，不要清空或歸零
+
+此 endpoint 只應更新價格／監控相關欄位，不要覆寫 `name_zh`、`images`、`description` 等
 
 環境變數：`XANO_UPDATE_PRODUCT_STOCK_URL`
 
@@ -89,6 +133,9 @@ Body：
 ```
 
 環境變數：`XANO_CREATE_STOCK_CHECK_URL`
+
+- `create-stock-check` 的 `price_jpy` 可為 `null`（如 ZOZO 第一版無法伺服器爬價），僅作檢查紀錄
+- 同一輪 Check Now 呼叫 `update-product-stock` 時，**僅在 `price_jpy > 0` 才送 `last_price_jpy`**；否則只更新 `last_checked_at` / `last_stock_status` / `check_status`，避免 `null` 覆蓋商品現有價格
 
 ## Check Now 第一版邏輯
 

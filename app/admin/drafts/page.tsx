@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { deferClientUpdate } from "@/lib/react/defer-client-update";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { SizeTableEditor } from "@/components/admin/SizeTableEditor";
 import { openStockSync } from "@/lib/admin/stock-sync";
@@ -10,9 +9,26 @@ import { filterProductsBySearch } from "@/lib/products/product-search";
 import type { ZozoSizeTableRow } from "@/lib/products/size-table-json";
 import type { DraftProduct } from "@/lib/types/product-import";
 
+function resolveLoadErrorMessage(
+  response: Response,
+  data: { error?: string }
+): string {
+  if (response.status === 429) {
+    return "Xano 請求過於頻繁，請稍候 20 秒再重試。";
+  }
+
+  const message = data.error || "讀取失敗";
+  if (message.includes("429")) {
+    return "Xano 請求過於頻繁，請稍候 20 秒再重試。";
+  }
+
+  return message;
+}
+
 export default function DraftsPage() {
   const [products, setProducts] = useState<DraftProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadSucceeded, setLoadSucceeded] = useState(false);
   const [error, setError] = useState("");
   const [publishingId, setPublishingId] = useState<number | null>(null);
   const [syncingId, setSyncingId] = useState<number | null>(null);
@@ -21,6 +37,7 @@ export default function DraftsPage() {
   const [sizeTableDrafts, setSizeTableDrafts] = useState<Record<number, ZozoSizeTableRow[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedDescriptions, setExpandedDescriptions] = useState<Record<number, boolean>>({});
+  const loadDraftsInFlightRef = useRef(false);
 
   const toggleDescription = (productId: number) => {
     setExpandedDescriptions((prev) => ({
@@ -42,6 +59,11 @@ export default function DraftsPage() {
   );
 
   const loadDrafts = useCallback(async () => {
+    if (loadDraftsInFlightRef.current) {
+      return;
+    }
+
+    loadDraftsInFlightRef.current = true;
     setLoading(true);
     setError("");
 
@@ -50,8 +72,7 @@ export default function DraftsPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || "讀取失敗");
-        setProducts([]);
+        setError(resolveLoadErrorMessage(response, data));
         return;
       }
 
@@ -60,6 +81,7 @@ export default function DraftsPage() {
         console.log("DRAFT PRODUCT", product);
       });
       setProducts(list);
+      setLoadSucceeded(true);
       setGenderDrafts(
         Object.fromEntries(list.map((product) => [product.id, product.gender || "unisex"]))
       );
@@ -68,14 +90,14 @@ export default function DraftsPage() {
       );
     } catch {
       setError("網路錯誤，請稍後再試");
-      setProducts([]);
     } finally {
+      loadDraftsInFlightRef.current = false;
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    deferClientUpdate(() => {
+    queueMicrotask(() => {
       void loadDrafts();
     });
   }, [loadDrafts]);
@@ -158,13 +180,19 @@ export default function DraftsPage() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <p className="text-sm text-neutral-500">
-            共 {filteredProducts.length} 筆 Draft 商品
-            {searchQuery.trim() ? `（全部 ${products.length} 筆）` : ""}
+            {loadSucceeded || products.length > 0
+              ? `共 ${filteredProducts.length} 筆 Draft 商品${
+                  searchQuery.trim() ? `（全部 ${products.length} 筆）` : ""
+                }`
+              : error
+                ? "Draft 列表載入失敗"
+                : "載入 Draft 列表中..."}
           </p>
           <button
             type="button"
             onClick={loadDrafts}
-            className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-bold text-neutral-700"
+            disabled={loading}
+            className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-bold text-neutral-700 disabled:opacity-50"
           >
             重新整理
           </button>
@@ -202,7 +230,7 @@ export default function DraftsPage() {
           </div>
         )}
 
-        {!loading && !error && products.length === 0 && (
+        {!loading && loadSucceeded && !error && products.length === 0 && (
           <div className="rounded-3xl border border-neutral-100 bg-neutral-50 p-8 text-center">
             <p className="text-sm font-bold text-neutral-700">目前沒有 Draft 商品</p>
             <p className="mt-2 text-xs text-neutral-500">請先到匯入頁面建立商品</p>

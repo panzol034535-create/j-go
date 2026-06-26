@@ -53,6 +53,7 @@ export type ImportProductResponse = {
 export type SyncProductStockPayload = {
   product_id: number;
   variant_stock: VariantStock[];
+  /** ZOZO 頁面 JSON-LD / 購買區塊解析出的日幣售價；僅 > 0 時才應送出。 */
   current_jpy_price?: number;
 };
 

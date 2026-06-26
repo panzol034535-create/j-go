@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles, ChevronDown, Heart, ShieldCheck, Clock } from "lucide-react";
@@ -26,10 +26,10 @@ import {
   getProductModelSizeFields,
 } from "@/lib/products/zozo-model-size";
 import { SizeTableEditor } from "@/components/admin/SizeTableEditor";
-import { buildSizeRecommendation, normalizeSizeName } from "@/lib/products/size-recommendation";
+import { buildSizeRecommendation, normalizeSizeName, type SizeRecommendationResult } from "@/lib/products/size-recommendation";
 import { filterProductsBySearch } from "@/lib/products/product-search";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
-import { isFavoriteProduct, loadFavoriteIds, saveFavoriteIds, toggleFavoriteId } from "@/lib/favorites";
+import { isFavoriteProduct, getFavoriteIdsStorageKey, loadFavoriteIds, saveFavoriteIds, toggleFavoriteId } from "@/lib/favorites";
 import { formatShippedAt, toDatetimeLocalValue, toIsoDateTime } from "@/lib/orders/shipping";
 import {
   formatPaymentStatus,
@@ -46,6 +46,13 @@ import {
   bumpLookbookFavoriteCount,
   bumpProductFavoriteCount,
   FRONTEND_FAVORITE_ADD_INCREMENT,
+  getFavoriteCountErrorMessage,
+  setFavoriteLookbookRankingCount,
+  setFavoriteProductRankingCount,
+  setLookbookFavoriteCount,
+  setProductFavoriteCount,
+  syncLookbookFavoriteCount,
+  syncProductFavoriteCount,
 } from "@/lib/rankings/favorite-ranking";
 import { parseRankingItems } from "@/lib/rankings/ranking-response";
 import { HOME_TRUST_CARDS, PRODUCT_TRUST_BADGES } from "@/lib/trust-signals";
@@ -62,6 +69,7 @@ import {
   trackSearchProducts,
 } from "@/lib/analytics";
 import {
+  getFavoriteLookbookIdsStorageKey,
   isFavoriteLookbook,
   loadFavoriteLookbookIds,
   resolveLookbookId,
@@ -72,15 +80,14 @@ import { formatLookbookList, type FormattedLookbook } from "@/lib/lookbooks/form
 import { formatXanoProducts, type FormattedXanoProduct } from "@/lib/products/format-xano-product";
 import { hasInitialRankings, type InitialRankings } from "@/lib/home-initial-data";
 import type { HomePageData } from "@/lib/server/home-data";
-import { deferClientUpdate } from "@/lib/react/defer-client-update";
 import type {
+  AppliedCoupon,
   JGoCartItem,
   JGoOrder,
   JGoUser,
   StockQtyMap,
   StockStatusMap,
 } from "@/lib/types/jgo-app";
-import type { SizeRecommendationResult } from "@/lib/products/size-recommendation";
 import {
   readHomeLookbooksCache,
   readHomeProductsCache,
@@ -91,20 +98,52 @@ import {
   saveProductsCacheV2,
 } from "@/lib/home-cache";
 
+type OutfitSelection = { color: string; size: string };
+
+type RankedProduct = FormattedXanoProduct & {
+  rank: number;
+  soldCount?: number;
+  favoriteCount?: number;
+};
+
+type RankedLookbook = FormattedLookbook & {
+  rank: number;
+  favoriteCount?: number;
+};
+
+type OrderLineItem = {
+  id?: string | number;
+  product_name?: string;
+  name?: string;
+  color?: string;
+  size?: string;
+  qty?: number;
+  unit_price?: number;
+  price?: number;
+  subtotal?: number;
+};
+
+function asOrderItems(items: unknown[] | undefined): OrderLineItem[] {
+  return (items ?? []) as OrderLineItem[];
+}
+
 function Button({
   children,
   onClick,
   className = "",
+  disabled = false,
 }: {
   children: React.ReactNode;
   onClick?: React.MouseEventHandler<HTMLButtonElement>;
   className?: string;
+  disabled?: boolean;
 }) {
   const hasColorOverride = className.includes("text-neutral") || className.includes("text-black") || className.includes("text-white");
 
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={`inline-flex items-center justify-center rounded-md px-4 py-2 font-bold transition ${hasColorOverride ? "" : "text-white"} ${className}`}
     >
       {children}
@@ -268,6 +307,18 @@ const EMPTY_INITIAL_RANKINGS: InitialRankings = {
   favoriteLookbookRankings: [],
 };
 
+function subscribeClientMounted() {
+  return () => {};
+}
+
+function getClientMountedSnapshot() {
+  return true;
+}
+
+function getServerMountedSnapshot() {
+  return false;
+}
+
 export default function JGoApp({
   initialProducts,
   initialLookbooks,
@@ -277,30 +328,24 @@ export default function JGoApp({
   const hasInitialLookbooks = initialLookbooks.length > 0;
   const hasInitialRankingsData = hasInitialRankings(initialRankings);
   const { user, isSignedIn } = useUser();
+  const favoriteIdsStorageKey = useMemo(
+    () => getFavoriteIdsStorageKey(user?.id),
+    [user?.id]
+  );
+  const favoriteLookbookIdsStorageKey = useMemo(
+    () => getFavoriteLookbookIdsStorageKey(user?.id),
+    [user?.id]
+  );
   const [tab, setTab] = useState("home");
   const [products, setProducts] = useState<FormattedXanoProduct[]>(initialProducts);
   const [lookbooks, setLookbooks] = useState<FormattedLookbook[]>(initialLookbooks);
   const [selectedLookbook, setSelectedLookbook] = useState<FormattedLookbook | null>(null);
-  const [outfitSelections, setOutfitSelections] = useState<Record<number, string>>({});
+  const [outfitSelections, setOutfitSelections] = useState<Record<number, OutfitSelection>>({});
   const [activeGender, setActiveGender] = useState("all");
   const [activeBrand, setActiveBrand] = useState("all");
   const [shopSearchQuery, setShopSearchQuery] = useState("");
-  const [favoriteIds, setFavoriteIds] = useState<number[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      return loadFavoriteIds();
-    } catch {
-      return [];
-    }
-  });
-  const [favoriteLookbookIds, setFavoriteLookbookIds] = useState<number[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      return loadFavoriteLookbookIds();
-    } catch {
-      return [];
-    }
-  });
+  const [favoriteIds, setFavoriteIds] = useState<number[]>([]);
+  const [favoriteLookbookIds, setFavoriteLookbookIds] = useState<number[]>([]);
   const [favoritesTab, setFavoritesTab] = useState("products");
   const [loadingProducts, setLoadingProducts] = useState(!hasInitialProducts);
   const [isHomeDataLoading, setIsHomeDataLoading] = useState(!hasInitialProducts);
@@ -316,7 +361,11 @@ export default function JGoApp({
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeClientMounted,
+    getClientMountedSnapshot,
+    getServerMountedSnapshot
+  );
   const [cart, setCart] = useState<JGoCartItem[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -334,8 +383,10 @@ export default function JGoApp({
   const [orders, setOrders] = useState<JGoOrder[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<JGoOrder | null>(null);
   const [orderFilter, setOrderFilter] = useState("all");
-  const [trackingForms, setTrackingForms] = useState({});
-  const [prelaunchChecks, setPrelaunchChecks] = useState([]);
+  const [trackingForms, setTrackingForms] = useState<
+    Record<number, { trackingNo?: string; shippingCompany?: string; shippedAt?: string }>
+  >({});
+  const [prelaunchChecks, setPrelaunchChecks] = useState<Awaited<ReturnType<typeof runPrelaunchChecks>>>([]);
   const [prelaunchLoading, setPrelaunchLoading] = useState(false);
   const [salesRankings, setSalesRankings] = useState(initialRankings.salesRankings);
   const [favoriteProductRankings, setFavoriteProductRankings] = useState(
@@ -344,6 +395,11 @@ export default function JGoApp({
   const [favoriteLookbookRankings, setFavoriteLookbookRankings] = useState(
     initialRankings.favoriteLookbookRankings
   );
+  const productsFetchInFlightRef = useRef<Promise<void> | null>(null);
+  const lookbooksFetchInFlightRef = useRef<Promise<void> | null>(null);
+  const rankingsFetchInFlightRef = useRef<Promise<void> | null>(null);
+  const productFavoriteSyncInFlightRef = useRef<Set<number>>(new Set());
+  const lookbookFavoriteSyncInFlightRef = useRef<Set<number>>(new Set());
   const [isFavoriteProductsRankingLoading, setIsFavoriteProductsRankingLoading] = useState(
     !hasInitialRankingsData
   );
@@ -378,6 +434,11 @@ export default function JGoApp({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState("");
+  const [couponCodeInput, setCouponCodeInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
+  const [couponError, setCouponError] = useState("");
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
+  const cartCouponResetRef = useRef(true);
   const [lookbookForm, setLookbookForm] = useState({
     title: "",
     image: "",
@@ -385,10 +446,10 @@ export default function JGoApp({
     gender: "unisex",
     product_ids: "",
   });
-  const [editingLookbookId, setEditingLookbookId] = useState(null);
+  const [editingLookbookId, setEditingLookbookId] = useState<number | null>(null);
   const [lookbookImagePreview, setLookbookImagePreview] = useState("");
   const [isUploadingLookbookImage, setIsUploadingLookbookImage] = useState(false);
-  const lookbookImageInputRef = React.useRef(null);
+  const lookbookImageInputRef = React.useRef<HTMLInputElement | null>(null);
   const [sizeAI, setSizeAI] = useState({ gender: "male", height: "", weight: "" });
   const [sizeAIResult, setSizeAIResult] = useState<SizeRecommendationResult | null>(null);
   const [productForm, setProductForm] = useState({
@@ -412,22 +473,21 @@ export default function JGoApp({
     recommended_weight: "",
     size_chart: "",
   });
-  const [editingProductId, setEditingProductId] = useState(null);
-  const [defaultShippedAtValue] = useState(() => toDatetimeLocalValue(Date.now()));
+  const [editingProductId, setEditingProductId] = useState<number | null>(null);
   const isAdmin = user?.primaryEmailAddress?.emailAddress === "panzol034535@gmail.com";
-  const touchStartX = React.useRef(null);
+  const touchStartX = React.useRef<number | null>(null);
   const ordersLoadingRef = React.useRef(false);
 
   const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
 
   useEffect(() => {
     if (!isSignedIn || !user) {
-      deferClientUpdate(() => {
+      
         setCurrentUser(null);
         localStorage.removeItem("jgo_current_user");
         setAccountForm({ name: "", email: "", phone: "" });
         setCheckoutForm({ name: "", email: "", phone: "" });
-      });
+      
       return;
     }
 
@@ -439,17 +499,37 @@ export default function JGoApp({
       provider: "Clerk",
     };
 
-    deferClientUpdate(() => {
+    
       setCurrentUser(clerkUser);
       localStorage.setItem("jgo_current_user", JSON.stringify(clerkUser));
       setAccountForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
       setCheckoutForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
-    });
+    
   }, [isSignedIn, user?.id]);
 
   useEffect(() => {
-    deferClientUpdate(() => setMounted(true));
-  }, []);
+    if (!mounted) return;
+
+    queueMicrotask(() => {
+      let nextFavoriteIds: number[] = [];
+      let nextFavoriteLookbookIds: number[] = [];
+
+      try {
+        nextFavoriteIds = loadFavoriteIds(favoriteIdsStorageKey);
+      } catch {
+        nextFavoriteIds = [];
+      }
+
+      try {
+        nextFavoriteLookbookIds = loadFavoriteLookbookIds(favoriteLookbookIdsStorageKey);
+      } catch {
+        nextFavoriteLookbookIds = [];
+      }
+
+      setFavoriteIds(nextFavoriteIds);
+      setFavoriteLookbookIds(nextFavoriteLookbookIds);
+    });
+  }, [mounted, favoriteIdsStorageKey, favoriteLookbookIdsStorageKey]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -493,68 +573,105 @@ export default function JGoApp({
   };
 
   const refreshProductsFromXano = async ({ hasCache = hasProductsCache }: { hasCache?: boolean } = {}) => {
-    if (!hasCache) {
-      setLoadingProducts(true);
-      setIsHomeDataLoading(true);
+    if (productsFetchInFlightRef.current) {
+      return productsFetchInFlightRef.current;
     }
-    setHomeDataLoadError(false);
+
+    const task = (async () => {
+      if (!hasCache) {
+        setLoadingProducts(true);
+        setIsHomeDataLoading(true);
+      }
+      setHomeDataLoadError(false);
+
+      try {
+        const response = await fetchWithTimeout("/api/products", {}, 15000);
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          const message =
+            response.status === 429
+              ? "Xano 請求過於頻繁，請稍候 20 秒再重試。"
+              : data.error || data.message || `商品 API 載入失敗：${response.status}`;
+          throw new Error(message);
+        }
+
+        const data = await response.json();
+        const productList = Array.isArray(data.products) ? data.products : Array.isArray(data) ? data : [];
+        const formattedProducts = formatXanoProducts(productList);
+
+        console.log("PRODUCT API COUNT", formattedProducts.length);
+
+        if (formattedProducts.length > 0) {
+          saveProductsCacheV2(formattedProducts);
+          setHasProductsCache(true);
+          applyProducts(formattedProducts);
+        }
+      } catch (error) {
+        console.error("讀取商品失敗", error);
+        if (!hasCache) {
+          setHomeDataLoadError(true);
+        }
+      } finally {
+        setLoadingProducts(false);
+        setIsHomeDataLoading(false);
+      }
+    })();
+
+    productsFetchInFlightRef.current = task;
 
     try {
-      const response = await fetchWithTimeout("/api/products", {}, 15000);
-
-      if (!response.ok) {
-        throw new Error(`商品 API 載入失敗：${response.status}`);
-      }
-
-      const data = await response.json();
-      const productList = Array.isArray(data.products) ? data.products : Array.isArray(data) ? data : [];
-      const formattedProducts = formatXanoProducts(productList);
-
-      console.log("PRODUCT API COUNT", formattedProducts.length);
-
-      if (formattedProducts.length > 0) {
-        saveProductsCacheV2(formattedProducts);
-        setHasProductsCache(true);
-        applyProducts(formattedProducts);
-      }
-    } catch (error) {
-      console.error("讀取商品失敗", error);
-      if (!hasCache) {
-        setHomeDataLoadError(true);
-      }
+      await task;
     } finally {
-      setLoadingProducts(false);
-      setIsHomeDataLoading(false);
+      productsFetchInFlightRef.current = null;
     }
   };
 
   const loadLookbooks = async ({ hasCache = hasHomeLookbooksCache } = {}) => {
-    if (!hasCache) {
-      setIsLookbookLoading(true);
+    if (lookbooksFetchInFlightRef.current) {
+      return lookbooksFetchInFlightRef.current;
     }
-    setLookbooksLoadError(false);
+
+    const task = (async () => {
+      if (!hasCache) {
+        setIsLookbookLoading(true);
+      }
+      setLookbooksLoadError(false);
+
+      try {
+        const response = await fetchWithTimeout("/api/lookbooks", {}, 15000);
+        const data = await response.json();
+
+        if (!response.ok || data.success === false) {
+          const message =
+            response.status === 429
+              ? "Xano 請求過於頻繁，請稍候 20 秒再重試。"
+              : data.message || data.error || `讀取 Lookbook 失敗：${response.status}`;
+          throw new Error(message);
+        }
+
+        const rawList = Array.isArray(data.items) ? data.items : data.items?.items || [];
+        const formattedLookbooks = formatLookbookList(rawList);
+
+        saveHomeLookbooksCache(formattedLookbooks);
+        setHasHomeLookbooksCache(true);
+        setLookbooks(formattedLookbooks);
+      } catch (error) {
+        console.error("讀取 Lookbook 失敗", error);
+        if (!hasCache) {
+          setLookbooksLoadError(true);
+        }
+      } finally {
+        setIsLookbookLoading(false);
+      }
+    })();
+
+    lookbooksFetchInFlightRef.current = task;
 
     try {
-      const response = await fetchWithTimeout("/api/lookbooks", {}, 15000);
-      const data = await response.json();
-
-      if (!response.ok || data.success === false) {
-        throw new Error(data.message || `讀取 Lookbook 失敗：${response.status}`);
-      }
-
-      const rawList = Array.isArray(data.items) ? data.items : data.items?.items || [];
-      const formattedLookbooks = formatLookbookList(rawList);
-
-      saveHomeLookbooksCache(formattedLookbooks);
-      setHasHomeLookbooksCache(true);
-      setLookbooks(formattedLookbooks);
-    } catch (error) {
-      console.error("讀取 Lookbook 失敗", error);
-      if (!hasCache) {
-        setLookbooksLoadError(true);
-      }
+      await task;
     } finally {
-      setIsLookbookLoading(false);
+      lookbooksFetchInFlightRef.current = null;
     }
   };
 
@@ -656,7 +773,7 @@ export default function JGoApp({
     setIsUploadingLookbookImage(true);
 
     try {
-      const preview = await new Promise((resolve, reject) => {
+      const preview = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ""));
         reader.onerror = () => reject(new Error("無法讀取圖片預覽"));
@@ -729,6 +846,8 @@ export default function JGoApp({
       model_height: "",
       model_weight: "",
       model_size: "",
+      recommended_height: "",
+      recommended_weight: "",
       size_chart: "",
     });
     setEditingProductId(null);
@@ -919,7 +1038,8 @@ export default function JGoApp({
   const topSalesProducts = useMemo(() => {
     return salesRankings
       .map((entry, index) => {
-        const product = findProductById(productCatalog, entry.product_id);
+        const ranking = entry as Record<string, unknown>;
+        const product = findProductById(productCatalog, Number(ranking.product_id));
         if (!product) {
           return null;
         }
@@ -927,16 +1047,16 @@ export default function JGoApp({
         return {
           ...product,
           rank: index + 1,
-          soldCount: Number(entry.total_qty) || 0,
+          soldCount: Number(ranking.total_qty) || 0,
         };
       })
-      .filter(Boolean);
+      .filter((item) => item != null) as RankedProduct[];
   }, [salesRankings, productCatalog]);
 
   const topFavoriteProducts = useMemo(
     () => parseRankingItems(favoriteProductRankings)
       .map((entry, index) => {
-        const item = entry && typeof entry === "object" ? entry : {};
+        const item = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
         const productId = Number(item.id ?? item.product_id);
         const localProduct = findProductById(productCatalog, productId);
 
@@ -947,11 +1067,11 @@ export default function JGoApp({
         return {
           ...(localProduct || {
             id: productId,
-            name: item.name || "",
-            brand: item.brand || "",
-            price: item.price || 0,
-            image: item.image || "",
-            tag: item.tag || "日本選品",
+            name: typeof item.name === "string" ? item.name : "",
+            brand: typeof item.brand === "string" ? item.brand : "",
+            price: Number(item.price) || 0,
+            image: typeof item.image === "string" ? item.image : "",
+            tag: typeof item.tag === "string" ? item.tag : "日本選品",
           }),
           rank: index + 1,
           favoriteCount: localProduct != null
@@ -959,14 +1079,14 @@ export default function JGoApp({
             : Number(item.favorite_count ?? item.favoriteCount ?? 0) || 0,
         };
       })
-      .filter(Boolean),
+      .filter((item) => item != null) as RankedProduct[],
     [favoriteProductRankings, productCatalog]
   );
 
   const topFavoriteLookbooks = useMemo(
     () => parseRankingItems(favoriteLookbookRankings)
       .map((entry, index) => {
-        const item = entry && typeof entry === "object" ? entry : {};
+        const item = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
         const lookbookId = Number(item.id ?? item.lookbook_id);
         const localLookbook = lookbooks.find((lookbook) => Number(lookbook.id) === lookbookId);
 
@@ -977,11 +1097,13 @@ export default function JGoApp({
         return {
           ...(localLookbook || {
             id: lookbookId,
-            title: item.title || "J-GO Lookbook",
-            image: item.image || "",
-            tag: item.tag || item.style_tag || "AI LOOKBOOK",
-            gender: item.gender || "unisex",
-            product_ids: Array.isArray(item.product_ids) ? item.product_ids : [],
+            lookbook_id: lookbookId,
+            title: typeof item.title === "string" ? item.title : "J-GO Lookbook",
+            image: typeof item.image === "string" ? item.image : "",
+            tag: typeof item.tag === "string" ? item.tag : typeof item.style_tag === "string" ? item.style_tag : "AI LOOKBOOK",
+            gender: typeof item.gender === "string" ? item.gender : "unisex",
+            product_ids: Array.isArray(item.product_ids) ? item.product_ids as number[] : [],
+            raw_product_ids: typeof item.raw_product_ids === "string" ? item.raw_product_ids : "",
           }),
           rank: index + 1,
           favoriteCount: localLookbook != null
@@ -989,11 +1111,11 @@ export default function JGoApp({
             : Number(item.favorite_count ?? item.favoriteCount ?? 0) || 0,
         };
       })
-      .filter(Boolean),
+      .filter((item) => item != null) as RankedLookbook[],
     [favoriteLookbookRankings, lookbooks]
   );
 
-  const toggleFavorite = (productId) => {
+  const toggleFavorite = async (productId) => {
     const id = Number(productId);
     if (!id || Number.isNaN(id)) {
       return;
@@ -1002,39 +1124,98 @@ export default function JGoApp({
     const isAdding = !favoriteIds.some((entry) => Number(entry) === id);
     const nextIds = toggleFavoriteId(favoriteIds, productId);
 
-    setFavoriteIds(nextIds);
-    saveFavoriteIds(nextIds);
-
     if (!isAdding) {
+      setFavoriteIds(nextIds);
+      saveFavoriteIds(nextIds, favoriteIdsStorageKey);
       return;
     }
 
-    const nextProducts = bumpProductFavoriteCount(products, id, FRONTEND_FAVORITE_ADD_INCREMENT);
-    const nextRankings = bumpFavoriteProductRankings(
+    if (productFavoriteSyncInFlightRef.current.has(id)) {
+      return;
+    }
+
+    productFavoriteSyncInFlightRef.current.add(id);
+
+    const previousIds = favoriteIds;
+    const previousProducts = products;
+    const previousRankings = favoriteProductRankings;
+    const targetProduct = findProductById(products, id);
+    const optimisticFallback =
+      Number(targetProduct?.favoriteCount ?? 0) + FRONTEND_FAVORITE_ADD_INCREMENT;
+
+    setFavoriteIds(nextIds);
+    saveFavoriteIds(nextIds, favoriteIdsStorageKey);
+
+    const optimisticProducts = bumpProductFavoriteCount(
+      products,
+      id,
+      FRONTEND_FAVORITE_ADD_INCREMENT
+    );
+    const optimisticRankings = bumpFavoriteProductRankings(
       favoriteProductRankings,
       id,
       FRONTEND_FAVORITE_ADD_INCREMENT
     );
 
-    setProducts(nextProducts);
-    setFavoriteProductRankings(nextRankings);
-    saveProductsCacheV2(nextProducts);
-    saveHomeRankingsCache({
-      salesRankings,
-      favoriteProductRankings: nextRankings,
-      favoriteLookbookRankings,
+    setProducts(optimisticProducts);
+    setFavoriteProductRankings(optimisticRankings);
+    setSelectedProduct((prev) => {
+      if (!prev || Number(prev.id) !== id) return prev;
+      const updated = optimisticProducts.find((item) => Number(item.id) === id);
+      return updated || prev;
     });
 
-    const product = findProductById(productCatalog, id);
-    trackFavoriteProduct({
-      id: product?.id ?? productId,
-      name: product?.name,
-      brand: product?.brand,
-      price: product?.price,
-    });
+    try {
+      const result = await syncProductFavoriteCount(id, "add", {
+        delta: FRONTEND_FAVORITE_ADD_INCREMENT,
+        fallbackCount: optimisticFallback,
+      });
+
+      const nextProducts = setProductFavoriteCount(optimisticProducts, id, result.favoriteCount);
+      const nextRankings = setFavoriteProductRankingCount(
+        optimisticRankings,
+        id,
+        result.favoriteCount
+      );
+
+      setProducts(nextProducts);
+      setFavoriteProductRankings(nextRankings);
+      setSelectedProduct((prev) => {
+        if (!prev || Number(prev.id) !== id) return prev;
+        const updated = nextProducts.find((item) => Number(item.id) === id);
+        return updated || prev;
+      });
+      saveProductsCacheV2(nextProducts);
+      saveHomeRankingsCache({
+        salesRankings,
+        favoriteProductRankings: nextRankings,
+        favoriteLookbookRankings,
+      });
+
+      const product = findProductById(productCatalog, id);
+      trackFavoriteProduct({
+        id: product?.id ?? productId,
+        name: product?.name,
+        brand: product?.brand,
+        price: product?.price,
+      });
+    } catch (error) {
+      setFavoriteIds(previousIds);
+      saveFavoriteIds(previousIds, favoriteIdsStorageKey);
+      setProducts(previousProducts);
+      setFavoriteProductRankings(previousRankings);
+      setSelectedProduct((prev) => {
+        if (!prev || Number(prev.id) !== id) return prev;
+        const restored = previousProducts.find((item) => Number(item.id) === id);
+        return restored || prev;
+      });
+      alert(getFavoriteCountErrorMessage(error));
+    } finally {
+      productFavoriteSyncInFlightRef.current.delete(id);
+    }
   };
 
-  const toggleFavoriteLookbook = (lookbookId) => {
+  const toggleFavoriteLookbook = async (lookbookId) => {
     const id = Number(lookbookId);
     if (!id || Number.isNaN(id)) {
       return;
@@ -1043,161 +1224,234 @@ export default function JGoApp({
     const isAdding = !favoriteLookbookIds.some((entry) => Number(entry) === id);
     const nextIds = toggleFavoriteLookbookId(favoriteLookbookIds, lookbookId);
 
-    setFavoriteLookbookIds(nextIds);
-    saveFavoriteLookbookIds(nextIds);
-
     if (!isAdding) {
+      setFavoriteLookbookIds(nextIds);
+      saveFavoriteLookbookIds(nextIds, favoriteLookbookIdsStorageKey);
       return;
     }
 
-    const nextLookbooks = bumpLookbookFavoriteCount(lookbooks, id, FRONTEND_FAVORITE_ADD_INCREMENT);
-    const nextRankings = bumpFavoriteLookbookRankings(
+    if (lookbookFavoriteSyncInFlightRef.current.has(id)) {
+      return;
+    }
+
+    lookbookFavoriteSyncInFlightRef.current.add(id);
+
+    const previousIds = favoriteLookbookIds;
+    const previousLookbooks = lookbooks;
+    const previousRankings = favoriteLookbookRankings;
+    const targetLookbook = lookbooks.find((item) => Number(item.id) === id);
+    const optimisticFallback =
+      Number(targetLookbook?.favoriteCount ?? 0) + FRONTEND_FAVORITE_ADD_INCREMENT;
+
+    setFavoriteLookbookIds(nextIds);
+    saveFavoriteLookbookIds(nextIds, favoriteLookbookIdsStorageKey);
+
+    const optimisticLookbooks = bumpLookbookFavoriteCount(
+      lookbooks,
+      id,
+      FRONTEND_FAVORITE_ADD_INCREMENT
+    );
+    const optimisticRankings = bumpFavoriteLookbookRankings(
       favoriteLookbookRankings,
       id,
       FRONTEND_FAVORITE_ADD_INCREMENT
     );
 
-    setLookbooks(nextLookbooks);
-    setFavoriteLookbookRankings(nextRankings);
-    saveHomeLookbooksCache(nextLookbooks);
-    saveHomeRankingsCache({
-      salesRankings,
-      favoriteProductRankings,
-      favoriteLookbookRankings: nextRankings,
+    setLookbooks(optimisticLookbooks);
+    setFavoriteLookbookRankings(optimisticRankings);
+    setSelectedLookbook((prev) => {
+      if (!prev || Number(prev.id) !== id) return prev;
+      const updated = optimisticLookbooks.find((item) => Number(item.id) === id);
+      return updated || prev;
     });
 
-    const lookbook = lookbooks.find((item) => Number(item.id) === id);
-    trackFavoriteLookbook({
-      id: lookbook?.id ?? lookbookId,
-      title: lookbook?.title,
-      tag: lookbook?.tag,
-    });
+    try {
+      const result = await syncLookbookFavoriteCount(id, "add", {
+        delta: FRONTEND_FAVORITE_ADD_INCREMENT,
+        fallbackCount: optimisticFallback,
+      });
+
+      const nextLookbooks = setLookbookFavoriteCount(optimisticLookbooks, id, result.favoriteCount);
+      const nextRankings = setFavoriteLookbookRankingCount(
+        optimisticRankings,
+        id,
+        result.favoriteCount
+      );
+
+      setLookbooks(nextLookbooks);
+      setFavoriteLookbookRankings(nextRankings);
+      setSelectedLookbook((prev) => {
+        if (!prev || Number(prev.id) !== id) return prev;
+        const updated = nextLookbooks.find((item) => Number(item.id) === id);
+        return updated || prev;
+      });
+      saveHomeLookbooksCache(nextLookbooks);
+      saveHomeRankingsCache({
+        salesRankings,
+        favoriteProductRankings,
+        favoriteLookbookRankings: nextRankings,
+      });
+
+      const lookbook = lookbooks.find((item) => Number(item.id) === id);
+      trackFavoriteLookbook({
+        id: lookbook?.id ?? lookbookId,
+        title: lookbook?.title,
+        tag: lookbook?.tag,
+      });
+    } catch (error) {
+      setFavoriteLookbookIds(previousIds);
+      saveFavoriteLookbookIds(previousIds, favoriteLookbookIdsStorageKey);
+      setLookbooks(previousLookbooks);
+      setFavoriteLookbookRankings(previousRankings);
+      setSelectedLookbook((prev) => {
+        if (!prev || Number(prev.id) !== id) return prev;
+        const restored = previousLookbooks.find((item) => Number(item.id) === id);
+        return restored || prev;
+      });
+      alert(getFavoriteCountErrorMessage(error));
+    } finally {
+      lookbookFavoriteSyncInFlightRef.current.delete(id);
+    }
   };
 
   const loadHomeRankings = async ({ hasCache = hasHomeRankingsCache } = {}) => {
-    if (!hasCache) {
-      setIsRankingLoading(true);
-      setIsFavoriteProductsRankingLoading(true);
-      setIsFavoriteLookbooksRankingLoading(true);
+    if (rankingsFetchInFlightRef.current) {
+      return rankingsFetchInFlightRef.current;
     }
 
-    setRankingLoadError(false);
-    setFavoriteProductsRankingError(false);
-    setFavoriteLookbooksRankingError(false);
+    const task = (async () => {
+      if (!hasCache) {
+        setIsRankingLoading(true);
+        setIsFavoriteProductsRankingLoading(true);
+        setIsFavoriteLookbooksRankingLoading(true);
+      }
 
-    let nextSalesRankings = salesRankings;
-    let nextFavoriteProductRankings = favoriteProductRankings;
-    let nextFavoriteLookbookRankings = favoriteLookbookRankings;
-    let salesOk = false;
-    let favoriteProductsOk = false;
-    let favoriteLookbooksOk = false;
+      setRankingLoadError(false);
+      setFavoriteProductsRankingError(false);
+      setFavoriteLookbooksRankingError(false);
 
-    const results = await Promise.allSettled([
-      fetchWithTimeout("/api/rankings/sales?limit=10&period=week", {}, 15000),
-      fetchWithTimeout("/api/rankings/favorites?limit=10", {}, 15000),
-      fetchWithTimeout("/api/rankings/lookbooks?limit=10", {}, 15000),
-    ]);
+      let nextSalesRankings = salesRankings;
+      let nextFavoriteProductRankings = favoriteProductRankings;
+      let nextFavoriteLookbookRankings = favoriteLookbookRankings;
+      let salesOk = false;
+      let favoriteProductsOk = false;
+      let favoriteLookbooksOk = false;
 
-    if (results[0].status === "fulfilled") {
-      try {
-        const salesResponse = results[0].value;
-        const data = await salesResponse.json();
-        const items = parseRankingItems(data.rankings ? { items: data.rankings } : data);
+      const results = await Promise.allSettled([
+        fetchWithTimeout("/api/rankings/sales?limit=10&period=week", {}, 15000),
+        fetchWithTimeout("/api/rankings/favorites?limit=10", {}, 15000),
+        fetchWithTimeout("/api/rankings/lookbooks?limit=10", {}, 15000),
+      ]);
 
-        if (!salesResponse.ok || data.success === false) {
-          throw new Error(data.message || `讀取銷售排行失敗：${salesResponse.status}`);
+      if (results[0].status === "fulfilled") {
+        try {
+          const salesResponse = results[0].value;
+          const data = await salesResponse.json();
+          const items = parseRankingItems(data.rankings ? { items: data.rankings } : data);
+
+          if (!salesResponse.ok || data.success === false) {
+            throw new Error(data.message || `讀取銷售排行失敗：${salesResponse.status}`);
+          }
+
+          nextSalesRankings = items;
+          setSalesRankings(items);
+          salesOk = true;
+        } catch (error) {
+          console.error("讀取銷售排行失敗", error);
+          if (!hasCache) {
+            setRankingLoadError(true);
+          }
         }
-
-        nextSalesRankings = items;
-        setSalesRankings(items);
-        salesOk = true;
-      } catch (error) {
-        console.error("讀取銷售排行失敗", error);
+      } else {
+        console.error("讀取銷售排行失敗", results[0].reason);
         if (!hasCache) {
           setRankingLoadError(true);
         }
       }
-    } else {
-      console.error("讀取銷售排行失敗", results[0].reason);
-      if (!hasCache) {
-        setRankingLoadError(true);
-      }
-    }
 
-    if (results[1].status === "fulfilled") {
-      try {
-        const favoriteProductsResponse = results[1].value;
-        const data = await favoriteProductsResponse.json();
-        const items = parseRankingItems(data);
+      if (results[1].status === "fulfilled") {
+        try {
+          const favoriteProductsResponse = results[1].value;
+          const data = await favoriteProductsResponse.json();
+          const items = parseRankingItems(data);
 
-        if (!favoriteProductsResponse.ok || data.success === false) {
-          throw new Error(data.message || `讀取商品收藏排行失敗：${favoriteProductsResponse.status}`);
+          if (!favoriteProductsResponse.ok || data.success === false) {
+            throw new Error(data.message || `讀取商品收藏排行失敗：${favoriteProductsResponse.status}`);
+          }
+
+          nextFavoriteProductRankings = items;
+          setFavoriteProductRankings(nextFavoriteProductRankings);
+          favoriteProductsOk = true;
+        } catch (error) {
+          console.error("讀取商品收藏排行失敗", error);
+          if (!hasCache) {
+            setFavoriteProductsRankingError(true);
+          }
         }
-
-        nextFavoriteProductRankings = items;
-        setFavoriteProductRankings(items);
-        favoriteProductsOk = true;
-      } catch (error) {
-        console.error("讀取商品收藏排行失敗", error);
+      } else {
+        console.error("讀取商品收藏排行失敗", results[1].reason);
         if (!hasCache) {
           setFavoriteProductsRankingError(true);
         }
       }
-    } else {
-      console.error("讀取商品收藏排行失敗", results[1].reason);
-      if (!hasCache) {
-        setFavoriteProductsRankingError(true);
-      }
-    }
 
-    if (results[2].status === "fulfilled") {
-      try {
-        const favoriteLookbooksResponse = results[2].value;
-        const data = await favoriteLookbooksResponse.json();
-        const items = parseRankingItems(data);
+      if (results[2].status === "fulfilled") {
+        try {
+          const favoriteLookbooksResponse = results[2].value;
+          const data = await favoriteLookbooksResponse.json();
+          const items = parseRankingItems(data);
 
-        if (!favoriteLookbooksResponse.ok || data.success === false) {
-          throw new Error(data.message || `讀取穿搭收藏排行失敗：${favoriteLookbooksResponse.status}`);
+          if (!favoriteLookbooksResponse.ok || data.success === false) {
+            throw new Error(data.message || `讀取穿搭收藏排行失敗：${favoriteLookbooksResponse.status}`);
+          }
+
+          nextFavoriteLookbookRankings = items;
+          setFavoriteLookbookRankings(nextFavoriteLookbookRankings);
+          favoriteLookbooksOk = true;
+        } catch (error) {
+          console.error("讀取穿搭收藏排行失敗", error);
+          if (!hasCache) {
+            setFavoriteLookbooksRankingError(true);
+          }
         }
-
-        nextFavoriteLookbookRankings = items;
-        setFavoriteLookbookRankings(items);
-        favoriteLookbooksOk = true;
-      } catch (error) {
-        console.error("讀取穿搭收藏排行失敗", error);
+      } else {
+        console.error("讀取穿搭收藏排行失敗", results[2].reason);
         if (!hasCache) {
           setFavoriteLookbooksRankingError(true);
         }
       }
-    } else {
-      console.error("讀取穿搭收藏排行失敗", results[2].reason);
-      if (!hasCache) {
-        setFavoriteLookbooksRankingError(true);
+
+      if (salesOk || favoriteProductsOk || favoriteLookbooksOk) {
+        const existingRankings = readHomeRankingsCache() || {
+          salesRankings: [],
+          favoriteProductRankings: [],
+          favoriteLookbookRankings: [],
+        };
+
+        saveHomeRankingsCache({
+          salesRankings: salesOk ? nextSalesRankings : existingRankings.salesRankings,
+          favoriteProductRankings: favoriteProductsOk
+            ? nextFavoriteProductRankings
+            : existingRankings.favoriteProductRankings,
+          favoriteLookbookRankings: favoriteLookbooksOk
+            ? nextFavoriteLookbookRankings
+            : existingRankings.favoriteLookbookRankings,
+        });
+        setHasHomeRankingsCache(true);
       }
+
+      setIsRankingLoading(false);
+      setIsFavoriteProductsRankingLoading(false);
+      setIsFavoriteLookbooksRankingLoading(false);
+    })();
+
+    rankingsFetchInFlightRef.current = task;
+
+    try {
+      await task;
+    } finally {
+      rankingsFetchInFlightRef.current = null;
     }
-
-    if (salesOk || favoriteProductsOk || favoriteLookbooksOk) {
-      const existingRankings = readHomeRankingsCache() || {
-        salesRankings: [],
-        favoriteProductRankings: [],
-        favoriteLookbookRankings: [],
-      };
-
-      saveHomeRankingsCache({
-        salesRankings: salesOk ? nextSalesRankings : existingRankings.salesRankings,
-        favoriteProductRankings: favoriteProductsOk
-          ? nextFavoriteProductRankings
-          : existingRankings.favoriteProductRankings,
-        favoriteLookbookRankings: favoriteLookbooksOk
-          ? nextFavoriteLookbookRankings
-          : existingRankings.favoriteLookbookRankings,
-      });
-      setHasHomeRankingsCache(true);
-    }
-
-    setIsRankingLoading(false);
-    setIsFavoriteProductsRankingLoading(false);
-    setIsFavoriteLookbooksRankingLoading(false);
   };
 
   const loadSalesRankings = async (options = {}) => loadHomeRankings(options);
@@ -1205,74 +1459,72 @@ export default function JGoApp({
   const loadFavoriteLookbookRankings = async (options = {}) => loadHomeRankings(options);
 
   useEffect(() => {
-    let productsHasData = initialProducts.length > 0;
-    let lookbooksHasData = initialLookbooks.length > 0;
-    let rankingsHasData = hasInitialRankings(initialRankings);
+    queueMicrotask(() => {
+      if (hasInitialProducts) {
+        saveProductsCacheV2(initialProducts);
+      } else {
+        let productsHasData = false;
 
-    if (initialProducts.length > 0) {
-      saveProductsCacheV2(initialProducts);
-    }
-
-    if (initialLookbooks.length > 0) {
-      saveHomeLookbooksCache(initialLookbooks);
-    }
-
-    if (rankingsHasData) {
-      saveHomeRankingsCache(initialRankings);
-    }
-
-    if (!productsHasData) {
-      try {
-        const cachedProducts = readProductsCacheV2();
-        if (Array.isArray(cachedProducts) && cachedProducts.length > 0) {
-          console.log("PRODUCT CACHE COUNT", cachedProducts.length);
-          deferClientUpdate(() => {
-            applyProducts(cachedProducts);
+        try {
+          const cachedProducts = readProductsCacheV2();
+          if (Array.isArray(cachedProducts) && cachedProducts.length > 0) {
+            console.log("PRODUCT CACHE COUNT", cachedProducts.length);
+            applyProducts(cachedProducts as FormattedXanoProduct[]);
             setHasProductsCache(true);
             setLoadingProducts(false);
             setIsHomeDataLoading(false);
-          });
-          productsHasData = true;
-        } else {
-          const legacyHomeProducts = readHomeProductsCache();
-          if (Array.isArray(legacyHomeProducts) && legacyHomeProducts.length > 0) {
-            console.log("PRODUCT CACHE COUNT", legacyHomeProducts.length);
-            deferClientUpdate(() => {
-              applyProducts(legacyHomeProducts);
-              saveProductsCacheV2(legacyHomeProducts);
+            productsHasData = true;
+          } else {
+            const legacyHomeProducts = readHomeProductsCache();
+            if (Array.isArray(legacyHomeProducts) && legacyHomeProducts.length > 0) {
+              console.log("PRODUCT CACHE COUNT", legacyHomeProducts.length);
+              applyProducts(legacyHomeProducts as FormattedXanoProduct[]);
+              saveProductsCacheV2(legacyHomeProducts as FormattedXanoProduct[]);
               setHasProductsCache(true);
               setLoadingProducts(false);
               setIsHomeDataLoading(false);
-            });
-            productsHasData = true;
+              productsHasData = true;
+            }
           }
+        } catch (error) {
+          console.error("讀取商品快取失敗", error);
         }
-      } catch (error) {
-        console.error("讀取商品快取失敗", error);
-      }
-    }
 
-    if (!lookbooksHasData) {
-      try {
-        const cachedLookbooks = readHomeLookbooksCache();
-        if (Array.isArray(cachedLookbooks) && cachedLookbooks.length > 0) {
-          deferClientUpdate(() => {
-            setLookbooks(cachedLookbooks);
+        if (!productsHasData) {
+          void refreshProductsFromXano({ hasCache: false });
+        }
+      }
+
+      if (hasInitialLookbooks) {
+        saveHomeLookbooksCache(initialLookbooks);
+      } else {
+        let lookbooksHasData = false;
+
+        try {
+          const cachedLookbooks = readHomeLookbooksCache();
+          if (Array.isArray(cachedLookbooks) && cachedLookbooks.length > 0) {
+            setLookbooks(cachedLookbooks as FormattedLookbook[]);
             setHasHomeLookbooksCache(true);
             setIsLookbookLoading(false);
-          });
-          lookbooksHasData = true;
+            lookbooksHasData = true;
+          }
+        } catch (error) {
+          console.error("讀取 Lookbook 快取失敗", error);
         }
-      } catch (error) {
-        console.error("讀取 Lookbook 快取失敗", error);
-      }
-    }
 
-    if (!rankingsHasData) {
-      try {
-        const cachedRankings = readHomeRankingsCache();
-        if (cachedRankings && hasInitialRankings(cachedRankings)) {
-          deferClientUpdate(() => {
+        if (!lookbooksHasData) {
+          void loadLookbooks({ hasCache: false });
+        }
+      }
+
+      if (hasInitialRankingsData) {
+        saveHomeRankingsCache(initialRankings);
+      } else {
+        let rankingsHasData = false;
+
+        try {
+          const cachedRankings = readHomeRankingsCache();
+          if (cachedRankings && hasInitialRankings(cachedRankings)) {
             setSalesRankings(cachedRankings.salesRankings);
             setFavoriteProductRankings(cachedRankings.favoriteProductRankings);
             setFavoriteLookbookRankings(cachedRankings.favoriteLookbookRankings);
@@ -1280,31 +1532,17 @@ export default function JGoApp({
             setIsRankingLoading(false);
             setIsFavoriteProductsRankingLoading(false);
             setIsFavoriteLookbooksRankingLoading(false);
-          });
-          rankingsHasData = true;
+            rankingsHasData = true;
+          }
+        } catch (error) {
+          console.error("讀取排行榜快取失敗", error);
         }
-      } catch (error) {
-        console.error("讀取排行榜快取失敗", error);
+
+        if (!rankingsHasData) {
+          void loadHomeRankings({ hasCache: false });
+        }
       }
-    }
-
-    if (!productsHasData) {
-      deferClientUpdate(() => {
-        void refreshProductsFromXano({ hasCache: false });
-      });
-    }
-
-    if (!lookbooksHasData) {
-      deferClientUpdate(() => {
-        void loadLookbooks({ hasCache: false });
-      });
-    }
-
-    if (!rankingsHasData) {
-      deferClientUpdate(() => {
-        void loadHomeRankings({ hasCache: false });
-      });
-    }
+    });
   }, []);
 
   const runPrelaunchChecklist = async () => {
@@ -1323,6 +1561,88 @@ export default function JGoApp({
 
   const shipping = subtotal > 0 ? 60 : 0;
   const total = subtotal + shipping;
+
+  useEffect(() => {
+    if (cartCouponResetRef.current) {
+      cartCouponResetRef.current = false;
+      return;
+    }
+
+    setAppliedCoupon(null);
+    setCouponError("");
+  }, [cart]);
+
+  const removeAppliedCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError("");
+  };
+
+  const applyCoupon = async () => {
+    const code = couponCodeInput.trim();
+    if (!code) {
+      setCouponError("請輸入折扣碼");
+      setAppliedCoupon(null);
+      return;
+    }
+
+    if (subtotal <= 0) {
+      setCouponError("購物車是空的");
+      setAppliedCoupon(null);
+      return;
+    }
+
+    setIsApplyingCoupon(true);
+    setCouponError("");
+
+    try {
+      const response = await fetch("/api/validate-coupon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, subtotal }),
+      });
+
+      const data = (await response.json()) as {
+        coupon_id?: number;
+        code?: string;
+        coupon_code?: string;
+        discount_amount?: number;
+        final_total?: number;
+        total_price?: number;
+        message?: string;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setCouponError(data.message || data.error || "折價券無法使用");
+        setAppliedCoupon(null);
+        return;
+      }
+
+      const couponId = Number(data.coupon_id);
+      const discountAmount = Number(data.discount_amount);
+      const finalTotal = Number(data.final_total ?? data.total_price);
+
+      if (!couponId || Number.isNaN(discountAmount) || Number.isNaN(finalTotal)) {
+        setCouponError(data.message || data.error || "折價券無法使用");
+        setAppliedCoupon(null);
+        return;
+      }
+
+      setAppliedCoupon({
+        coupon_id: couponId,
+        code: String(data.code ?? data.coupon_code ?? code),
+        discount_amount: discountAmount,
+        final_total: finalTotal,
+        message: String(data.message ?? ""),
+      });
+      setCouponError("");
+    } catch {
+      setCouponError("網路錯誤，請稍後再試");
+      setAppliedCoupon(null);
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  };
 
   useEffect(() => {
     if (!mounted) return;
@@ -1425,6 +1745,7 @@ export default function JGoApp({
 
   const addToCart = () => {
     if (!isSignedIn || !currentUser) return requireLogin();
+    if (!selectedProduct) return;
 
     const selectedSizeOption = getVariantForColorAndSize(selectedProduct, selectedColor, selectedSize);
 
@@ -1528,7 +1849,7 @@ export default function JGoApp({
       return;
     }
 
-    const nextItems = [];
+    const nextItems: JGoCartItem[] = [];
     let hasUnknownStock = false;
 
     for (const product of relatedProducts) {
@@ -1555,7 +1876,11 @@ export default function JGoApp({
 
       nextItems.push({
         key: `${product.id}-${color}-${size}`,
-        ...product,
+        id: product.id,
+        name: product.name,
+        brand: product.brand,
+        price: product.price,
+        image: product.image,
         color,
         size,
         stock,
@@ -1631,7 +1956,7 @@ export default function JGoApp({
   const brandIntroText = buildBrandIntroText(selectedProduct);
 
   useEffect(() => {
-    deferClientUpdate(() => setSizeAIResult(null));
+    setSizeAIResult(null)
   }, [selectedProduct?.id]);
 
   const goToPrevImage = () => {
@@ -1801,23 +2126,24 @@ export default function JGoApp({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
 
-    if (params.get("payment") === "success") {
-      const savedUser = localStorage.getItem("jgo_current_user");
+    queueMicrotask(() => {
+      const params = new URLSearchParams(window.location.search);
 
-      if (savedUser) {
-        try {
-          const user = JSON.parse(savedUser);
-          trackPurchaseSuccess(readLatestPurchaseFromStorage(user.email));
-        } catch {
+      if (params.get("payment") === "success") {
+        const savedUser = localStorage.getItem("jgo_current_user");
+
+        if (savedUser) {
+          try {
+            const user = JSON.parse(savedUser);
+            trackPurchaseSuccess(readLatestPurchaseFromStorage(user.email));
+          } catch {
+            trackPurchaseSuccess();
+          }
+        } else {
           trackPurchaseSuccess();
         }
-      } else {
-        trackPurchaseSuccess();
-      }
 
-      deferClientUpdate(() => {
         setPaymentMessage("付款成功，正在更新訂單...");
         setTab("payment-result");
         refreshProductsFromXano({ hasCache: true });
@@ -1831,39 +2157,37 @@ export default function JGoApp({
             setTab("orders");
           }, 3500);
         }
-      });
 
-      window.history.replaceState({}, "", window.location.pathname);
-      return;
-    }
+        window.history.replaceState({}, "", window.location.pathname);
+        return;
+      }
 
-    const storeId = params.get("store_id") || params.get("CVSStoreID");
-    const storeName = params.get("store_name") || params.get("CVSStoreName");
-    const storeAddress = params.get("address") || params.get("CVSAddress");
+      const storeId = params.get("store_id") || params.get("CVSStoreID");
+      const storeName = params.get("store_name") || params.get("CVSStoreName");
+      const storeAddress = params.get("address") || params.get("CVSAddress");
 
-    if (storeId && storeName) {
-      const nextPickupStore = {
-        store_id: storeId,
-        store_name: storeName,
-        address: storeAddress || "",
-      };
-      deferClientUpdate(() => {
+      if (storeId && storeName) {
+        const nextPickupStore = {
+          store_id: storeId,
+          store_name: storeName,
+          address: storeAddress || "",
+        };
         setPickupStore(nextPickupStore);
         localStorage.setItem("jgo_pickup_store", JSON.stringify(nextPickupStore));
         setDelivery("711");
         setTab("checkout");
-      });
-      window.history.replaceState({}, "", window.location.pathname);
-    }
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    });
   }, []);
 
   useEffect(() => {
     if (tab === "orders" && currentUser?.email) {
-      deferClientUpdate(() => {
+      queueMicrotask(() => {
         void loadOrdersForUser(currentUser);
       });
     }
-  }, [tab, currentUser?.email]);
+  }, [tab, currentUser?.email, currentUser]);
 
   const loadAllOrdersForAdmin = async () => {
     if (!isAdmin) return;
@@ -1954,7 +2278,7 @@ export default function JGoApp({
       }
 
       setOrders((prev) => prev.map((order) => order.id === orderId ? { ...order, shippingStatus: nextStatus } : order));
-      setSelectedOrder((prev) => prev?.id === orderId ? { ...prev, shippingStatus: nextStatus } : prev);
+      setSelectedOrder((prev) => prev?.id === orderId ? ({ ...prev, shippingStatus: nextStatus } as JGoOrder) : prev);
       alert(`訂單已更新為：${nextStatus}`);
     } catch (error) {
       console.error(error);
@@ -2020,13 +2344,13 @@ export default function JGoApp({
         shippingStatus: "已出貨",
       } : item));
 
-      setSelectedOrder((prev) => prev?.id === order.id ? {
+      setSelectedOrder((prev) => prev?.id === order.id ? ({
         ...prev,
         trackingNo,
         shippingCompany,
         shippedAt: nextShippedAt,
         shippingStatus: "已出貨",
-      } : prev);
+      } as JGoOrder) : prev);
 
       setTrackingForms((prev) => ({
         ...prev,
@@ -2067,6 +2391,12 @@ export default function JGoApp({
 
     setIsSubmitting(true);
 
+    const subtotal_price = subtotal;
+    const discount_amount = appliedCoupon?.discount_amount ?? 0;
+    const discounted_subtotal = appliedCoupon
+      ? Math.max(0, subtotal_price - discount_amount)
+      : subtotal_price;
+
     try {
       const response = await fetch(XANO_CHECKOUT_URL, {
         method: "POST",
@@ -2079,6 +2409,11 @@ export default function JGoApp({
           customer_phone: checkoutForm.phone,
           delivery_method: delivery,
           total_price: total,
+          subtotal_price,
+          coupon_id: appliedCoupon?.coupon_id ?? null,
+          coupon_code: appliedCoupon?.code ?? "",
+          discount_amount,
+          discounted_subtotal,
           pickup_store_name: pickupStore.store_name,
           pickup_store_code: pickupStore.store_id,
           pickup_store_address: pickupStore.address,
@@ -2127,7 +2462,7 @@ export default function JGoApp({
       for (const item of cart) {
         console.log("送出單筆商品", {
           order_id: orderId,
-          product_name: item.name || item.product_name || selectedProduct?.name || "JGO商品",
+          product_name: item.name || selectedProduct?.name || "JGO商品",
           color: item.color,
           size: item.size,
           qty: item.qty,
@@ -2142,7 +2477,7 @@ export default function JGoApp({
           },
           body: JSON.stringify({
             order_id: orderId,
-            product_name: item.name || item.product_name || selectedProduct?.name || "JGO商品",
+            product_name: item.name || selectedProduct?.name || "JGO商品",
           color: item.color,
             size: item.size,
             qty: item.qty,
@@ -2152,7 +2487,7 @@ export default function JGoApp({
         });
 
         const itemText = await itemResponse.text();
-        let itemData = null;
+        let itemData: unknown = null;
 
         try {
           itemData = itemText ? JSON.parse(itemText) : null;
@@ -2180,7 +2515,7 @@ export default function JGoApp({
         });
 
         const stockText = await stockResponse.text();
-        let stockData = null;
+        let stockData: unknown = null;
 
         try {
           stockData = stockText ? JSON.parse(stockText) : null;
@@ -2201,7 +2536,7 @@ export default function JGoApp({
         id: orderId || `JG-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${String(orders.length + 1).padStart(4, "0")}`,
         items: cart.map((item) => ({
           id: item.key,
-          product_name: item.name || item.product_name || selectedProduct?.name || "JGO商品",
+          product_name: item.name || selectedProduct?.name || "JGO商品",
           color: item.color,
           size: item.size,
           qty: item.qty,
@@ -2222,6 +2557,9 @@ export default function JGoApp({
       saveOrderForUser(currentUser, order);
       setCart([]);
       localStorage.removeItem("jgo_cart");
+      setAppliedCoupon(null);
+      setCouponCodeInput("");
+      setCouponError("");
 
       const form = document.createElement("form");
       form.method = "POST";
@@ -2269,7 +2607,7 @@ export default function JGoApp({
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
-      <div className="mx-auto flex min-h-screen max-w-md flex-col bg-white shadow-2xl">
+      <div className="mx-auto flex h-[100dvh] max-h-[100dvh] max-w-md flex-col bg-white shadow-2xl">
         <header className="sticky top-0 z-10 border-b bg-white/90 px-5 py-4 backdrop-blur">
           <div className="flex items-center justify-between">
             <div>
@@ -2293,7 +2631,7 @@ export default function JGoApp({
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto px-5 py-5 pb-24">
+        <main className="min-h-0 flex-1 overflow-y-auto px-5 pt-5 pb-[calc(7rem+env(safe-area-inset-bottom))]">
           {tab === "home" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
               <section className="space-y-4">
@@ -2427,7 +2765,7 @@ export default function JGoApp({
                         </button>
                         <div className="absolute right-3 top-3 z-10">
                           <FavoriteHeartButton
-                            isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                            isFavorite={mounted && isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
                             onToggle={() => toggleFavoriteLookbook(lookbook.id)}
                           />
                         </div>
@@ -2523,7 +2861,7 @@ export default function JGoApp({
                         product={product}
                         rank={product.rank}
                         metricLabel={`已售出 ${product.soldCount} 件`}
-                        isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                        isFavorite={mounted && isFavoriteProduct(favoriteIds, product.id)}
                         onToggleFavorite={toggleFavorite}
                         onClick={() => openProduct(product)}
                         compact
@@ -2554,7 +2892,7 @@ export default function JGoApp({
                         product={product}
                         rank={product.rank}
                         metricLabel={`收藏 ${product.favoriteCount || 0} 次`}
-                        isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                        isFavorite={mounted && isFavoriteProduct(favoriteIds, product.id)}
                         onToggleFavorite={toggleFavorite}
                         onClick={() => openProduct(product)}
                         compact
@@ -2585,10 +2923,10 @@ export default function JGoApp({
                         lookbook={lookbook}
                         rank={lookbook.rank}
                         metricLabel={`收藏 ${lookbook.favoriteCount || 0} 次`}
-                        isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                        isFavorite={mounted && isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
                         onToggleFavorite={toggleFavoriteLookbook}
                         onClick={() => {
-                          setSelectedLookbook(lookbook);
+                          setSelectedLookbook(lookbook as FormattedLookbook);
                           setTab("lookbook-detail");
                         }}
                       />
@@ -2618,7 +2956,7 @@ export default function JGoApp({
                       <ProductCard
                         key={product.id}
                         product={product}
-                        isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                        isFavorite={mounted && isFavoriteProduct(favoriteIds, product.id)}
                         onToggleFavorite={toggleFavorite}
                         onClick={() => openProduct(product)}
                       />
@@ -2642,7 +2980,7 @@ export default function JGoApp({
                   <p className="text-sm font-bold tracking-widest text-neutral-400">STYLE FEED</p>
                   <h2 className="text-3xl font-black">AI 穿搭靈感</h2>
                 </div>
-                <Button onClick={loadLookbooks} className="rounded-2xl bg-neutral-900 text-sm">刷新</Button>
+                <Button onClick={() => void loadLookbooks()} className="rounded-2xl bg-neutral-900 text-sm">刷新</Button>
               </div>
 
               <div className="grid grid-cols-4 gap-2 rounded-2xl bg-neutral-100 p-1">
@@ -2685,10 +3023,10 @@ export default function JGoApp({
                         lookbook={lookbook}
                         rank={lookbook.rank}
                         metricLabel={`收藏 ${lookbook.favoriteCount || 0} 次`}
-                        isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                        isFavorite={mounted && isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
                         onToggleFavorite={toggleFavoriteLookbook}
                         onClick={() => {
-                          setSelectedLookbook(lookbook);
+                          setSelectedLookbook(lookbook as FormattedLookbook);
                           setTab("lookbook-detail");
                         }}
                       />
@@ -2730,7 +3068,7 @@ export default function JGoApp({
 
                             <div className="absolute right-4 top-4 z-10">
                               <FavoriteHeartButton
-                                isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                                isFavorite={mounted && isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
                                 onToggle={() => toggleFavoriteLookbook(lookbook.id)}
                               />
                             </div>
@@ -2895,7 +3233,7 @@ export default function JGoApp({
                       <ProductCard
                         key={product.id}
                         product={product}
-                        isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                        isFavorite={mounted && isFavoriteProduct(favoriteIds, product.id)}
                         onToggleFavorite={toggleFavorite}
                         onClick={() => openProduct(product)}
                       />
@@ -3010,7 +3348,7 @@ export default function JGoApp({
                     <ProductCard
                       key={product.id}
                       product={product}
-                      isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                      isFavorite={mounted && isFavoriteProduct(favoriteIds, product.id)}
                       onToggleFavorite={toggleFavorite}
                       onClick={() => openProduct(product)}
                     />
@@ -3079,7 +3417,7 @@ export default function JGoApp({
                     </div>
                   </div>
                   <FavoriteHeartButton
-                    isFavorite={isFavoriteProduct(favoriteIds, selectedProduct.id)}
+                    isFavorite={mounted && isFavoriteProduct(favoriteIds, selectedProduct.id)}
                     onToggle={() => toggleFavorite(selectedProduct.id)}
                     className="h-11 w-11 shrink-0"
                   />
@@ -3120,8 +3458,12 @@ export default function JGoApp({
                       </div>
                       {(() => {
                         const modelDisplay = formatModelSizeDisplay({
-                          model_height_cm: selectedProduct.modelHeightCm || null,
-                          model_weight_kg: selectedProduct.modelWeightKg || null,
+                          model_height_cm: selectedProduct.modelHeightCm
+                            ? Number(selectedProduct.modelHeightCm) || null
+                            : null,
+                          model_weight_kg: selectedProduct.modelWeightKg
+                            ? Number(selectedProduct.modelWeightKg) || null
+                            : null,
                           model_wear_size: selectedProduct.modelWearSize || "",
                         });
 
@@ -3367,7 +3709,7 @@ export default function JGoApp({
                         <ProductCard
                           key={product.id}
                           product={product}
-                          isFavorite={isFavoriteProduct(favoriteIds, product.id)}
+                          isFavorite={mounted && isFavoriteProduct(favoriteIds, product.id)}
                           onToggleFavorite={toggleFavorite}
                           onClick={() => openProduct(product)}
                         />
@@ -3414,7 +3756,7 @@ export default function JGoApp({
                               </button>
                               <div className="absolute right-3 top-3 z-10">
                                 <FavoriteHeartButton
-                                  isFavorite={isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
+                                  isFavorite={mounted && isFavoriteLookbook(favoriteLookbookIds, lookbook.id)}
                                   onToggle={() => toggleFavoriteLookbook(lookbook.id)}
                                 />
                               </div>
@@ -3469,7 +3811,21 @@ export default function JGoApp({
                       </CardContent>
                     </Card>
                   ))}
-                  <PriceBox subtotal={subtotal} shipping={shipping} total={total} />
+                  <CouponCheckoutSection
+                    couponCodeInput={couponCodeInput}
+                    onCouponCodeInputChange={setCouponCodeInput}
+                    onApply={applyCoupon}
+                    onRemove={removeAppliedCoupon}
+                    isApplying={isApplyingCoupon}
+                    error={couponError}
+                    appliedCoupon={appliedCoupon}
+                  />
+                  <PriceBox
+                    subtotal={subtotal}
+                    shipping={shipping}
+                    total={total}
+                    appliedCoupon={appliedCoupon}
+                  />
                   <Button onClick={() => {
                     if (!isSignedIn || !currentUser) return requireLogin();
                     setTab("checkout");
@@ -3581,7 +3937,21 @@ export default function JGoApp({
                   />
                 </section>
               )}
-              <PriceBox subtotal={subtotal} shipping={shipping} total={total} />
+              <CouponCheckoutSection
+                couponCodeInput={couponCodeInput}
+                onCouponCodeInputChange={setCouponCodeInput}
+                onApply={applyCoupon}
+                onRemove={removeAppliedCoupon}
+                isApplying={isApplyingCoupon}
+                error={couponError}
+                appliedCoupon={appliedCoupon}
+              />
+              <PriceBox
+                subtotal={subtotal}
+                shipping={shipping}
+                total={total}
+                appliedCoupon={appliedCoupon}
+              />
               <Button onClick={submitOrder} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
                 {isSubmitting ? "送出中..." : "送出訂單"}
               </Button>
@@ -3624,7 +3994,7 @@ export default function JGoApp({
 
                     <div className="flex items-center justify-between rounded-2xl bg-neutral-50 px-4 py-3">
                       <span className="text-sm font-black text-neutral-600">帳號設定 / 登出</span>
-                      <UserButton afterSignOutUrl="/" />
+                      <UserButton />
                     </div>
                   </CardContent>
                 </Card>
@@ -3877,7 +4247,7 @@ export default function JGoApp({
                 <CardContent className="space-y-3 p-4">
                   <div className="flex items-center justify-between">
                     <h3 className="font-black">Lookbook 管理</h3>
-                    <Button onClick={loadLookbooks} className="rounded-2xl bg-neutral-900 text-xs">刷新</Button>
+                    <Button onClick={() => void loadLookbooks()} className="rounded-2xl bg-neutral-900 text-xs">刷新</Button>
                   </div>
                   {lookbooks.length === 0 ? (
                     <p className="text-sm text-neutral-500">目前沒有 Lookbook</p>
@@ -3948,7 +4318,7 @@ export default function JGoApp({
                             <p className="mb-2 text-sm font-black">商品資訊</p>
 
                             <div className="space-y-2">
-                              {order.items.map((item) => (
+                              {asOrderItems(order.items).map((item) => (
                                 <div
                                   key={item.id || `${item.product_name}-${item.color}-${item.size}`}
                                   className="flex items-start justify-between gap-3 text-sm"
@@ -3963,7 +4333,7 @@ export default function JGoApp({
                                   </div>
 
                                   <p className="font-black">
-                                    {formatPrice(item.subtotal || (item.unit_price || 0) * item.qty)}
+                                    {formatPrice(item.subtotal || (item.unit_price || 0) * (item.qty ?? 0))}
                                   </p>
                                 </div>
                               ))}
@@ -3992,7 +4362,7 @@ export default function JGoApp({
                                   value={
                                     trackingForms[order.id]?.shippedAt
                                     ?? toDatetimeLocalValue(order.shippedAt)
-                                    ?? defaultShippedAtValue
+                                    ?? toDatetimeLocalValue(Date.now())
                                   }
                                   onChange={(e) => updateTrackingForm(order.id, "shippedAt", e.target.value)}
                                   className="h-11 w-full rounded-2xl border border-neutral-200 bg-white px-3 text-sm font-bold outline-none"
@@ -4271,16 +4641,16 @@ export default function JGoApp({
 
                     <OrderStatusSummary order={order} />
 
-                    <div className="flex items-center gap-2 text-sm text-neutral-600"><Package size={16} /> {order.items.length} 件商品</div>
-                    {order.items.length > 0 && (
+                    <div className="flex items-center gap-2 text-sm text-neutral-600"><Package size={16} /> {asOrderItems(order.items).length} 件商品</div>
+                    {asOrderItems(order.items).length > 0 && (
                       <div className="space-y-2 rounded-2xl bg-neutral-50 p-3">
-                        {order.items.map((item) => (
+                        {asOrderItems(order.items).map((item) => (
                           <div key={item.id || `${item.product_name}-${item.color}-${item.size}`} className="flex items-start justify-between gap-3 text-sm">
                             <div>
                               <p className="font-bold text-neutral-900">{item.product_name || item.name || "商品名稱未載入"}</p>
                               <p className="text-xs text-neutral-500">{item.color} / {item.size} × {item.qty}</p>
                             </div>
-                            <p className="font-bold">{formatPrice(item.subtotal ?? (item.unit_price || item.price || 0) * item.qty)}</p>
+                            <p className="font-bold">{formatPrice(item.subtotal ?? (item.unit_price || item.price || 0) * (item.qty ?? 0))}</p>
                           </div>
                         ))}
                       </div>
@@ -4320,14 +4690,14 @@ export default function JGoApp({
                   <div className="rounded-3xl bg-neutral-50 p-4">
                     <h3 className="mb-3 font-black">商品明細</h3>
                     <div className="space-y-3">
-                      {selectedOrder.items.length > 0 ? selectedOrder.items.map((item) => (
+                      {asOrderItems(selectedOrder.items).length > 0 ? asOrderItems(selectedOrder.items).map((item) => (
                         <div key={item.id || `${item.product_name}-${item.color}-${item.size}`} className="flex items-start justify-between gap-3 border-b border-neutral-200 pb-3 last:border-0 last:pb-0">
                           <div>
                             <p className="font-bold">{item.product_name || item.name || "商品名稱未載入"}</p>
                             <p className="mt-1 text-xs text-neutral-500">{item.color} / {item.size} × {item.qty}</p>
                             <p className="mt-1 text-xs text-neutral-400">單價 {formatPrice(item.unit_price || item.price || 0)}</p>
                           </div>
-                          <p className="font-black">{formatPrice(item.subtotal ?? (item.unit_price || item.price || 0) * item.qty)}</p>
+                          <p className="font-black">{formatPrice(item.subtotal ?? (item.unit_price || item.price || 0) * (item.qty ?? 0))}</p>
                         </div>
                       )) : (
                         <p className="text-sm text-neutral-500">目前沒有商品明細</p>
@@ -4373,7 +4743,7 @@ export default function JGoApp({
           )}
         </main>
 
-        <nav className="sticky bottom-0 grid grid-cols-6 border-t bg-white px-1 py-2">
+        <nav className="sticky bottom-0 z-10 shrink-0 grid grid-cols-6 border-t bg-white px-1 py-2 pb-[env(safe-area-inset-bottom)]">
           <NavButton active={tab === "home"} icon={<Home size={20} />} label="首頁" onClick={() => setTab("home")} />
           <NavButton active={tab === "lookbook" || tab === "lookbook-detail" || tab === "outfit-builder"} icon={<Sparkles size={20} />} label="穿搭" onClick={() => setTab("lookbook")} />
           <NavButton active={tab === "shop"} icon={<Search size={20} />} label="商品" onClick={() => setTab("shop")} />
@@ -4645,7 +5015,25 @@ function ProductAccordion({ sections }) {
   );
 }
 
-function OptionGroup({ title, options, value, setValue, disabledOptions = [], stockMap = {}, statusMap = {}, optionKeyPrefix = "" }) {
+function OptionGroup({
+  title,
+  options,
+  value,
+  setValue,
+  disabledOptions = [] as string[],
+  stockMap = {} as Record<string, number>,
+  statusMap = {} as Record<string, string>,
+  optionKeyPrefix = "",
+}: {
+  title: string;
+  options: string[];
+  value: string;
+  setValue: (value: string) => void;
+  disabledOptions?: string[];
+  stockMap?: Record<string, number>;
+  statusMap?: Record<string, string>;
+  optionKeyPrefix?: string;
+}) {
   return (
     <section>
       <h3 className="mb-3 font-bold">{title}</h3>
@@ -4820,7 +5208,14 @@ function TextArea({ label, placeholder, value, onChange }) {
   );
 }
 
-function Input({ label, placeholder, value, onChange, type = "text", icon }) {
+function Input({ label, placeholder, value, onChange, type = "text", icon }: {
+  label: string;
+  placeholder?: string;
+  value: string;
+  onChange?: (value: string) => void;
+  type?: string;
+  icon?: React.ReactNode;
+}) {
   return (
     <label className="block">
       <span className="mb-1 block text-sm font-bold">{label}</span>
@@ -4846,11 +5241,93 @@ function DeliveryButton({ active, onClick, icon, title }) {
   );
 }
 
-function PriceBox({ subtotal, shipping, total }) {
+function CouponCheckoutSection({
+  couponCodeInput,
+  onCouponCodeInputChange,
+  onApply,
+  onRemove,
+  isApplying,
+  error,
+  appliedCoupon,
+}: {
+  couponCodeInput: string;
+  onCouponCodeInputChange: (value: string) => void;
+  onApply: () => void | Promise<void>;
+  onRemove: () => void;
+  isApplying: boolean;
+  error: string;
+  appliedCoupon: AppliedCoupon | null;
+}) {
+  return (
+    <Card className="rounded-3xl border-neutral-100 bg-neutral-50">
+      <CardContent className="space-y-3 p-4">
+        <p className="text-sm font-black text-neutral-900">折扣碼</p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={couponCodeInput}
+            onChange={(event) => onCouponCodeInputChange(event.target.value)}
+            placeholder="輸入折扣碼"
+            disabled={isApplying}
+            className="h-11 min-w-0 flex-1 rounded-2xl border border-neutral-200 bg-white px-4 text-sm font-bold text-neutral-900 outline-none placeholder:font-medium placeholder:text-neutral-400 disabled:opacity-60"
+          />
+          <Button
+            onClick={() => void onApply()}
+            disabled={isApplying || !couponCodeInput.trim()}
+            className="h-11 shrink-0 rounded-2xl bg-neutral-900 px-4 text-sm"
+          >
+            {isApplying ? "套用中..." : "套用"}
+          </Button>
+        </div>
+        {error ? <p className="text-sm font-bold text-red-500">{error}</p> : null}
+        {appliedCoupon?.message ? (
+          <p className="text-sm font-bold text-emerald-600">{appliedCoupon.message}</p>
+        ) : null}
+        {appliedCoupon ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="text-sm font-bold text-neutral-500 underline-offset-2 hover:text-neutral-900 hover:underline"
+          >
+            移除折扣碼
+          </button>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PriceBox({
+  subtotal,
+  shipping,
+  total,
+  appliedCoupon = null,
+}: {
+  subtotal: number;
+  shipping: number;
+  total: number;
+  appliedCoupon?: AppliedCoupon | null;
+}) {
   return (
     <Card className="rounded-3xl border-neutral-100 bg-neutral-50">
       <CardContent className="space-y-2 p-4 text-sm">
         <div className="flex justify-between"><span>商品小計</span><span>{formatPrice(subtotal)}</span></div>
+        {appliedCoupon ? (
+          <>
+            <div className="flex justify-between">
+              <span>折扣碼</span>
+              <span className="font-black text-neutral-900">{appliedCoupon.code}</span>
+            </div>
+            <div className="flex justify-between text-red-600">
+              <span>折扣金額</span>
+              <span className="font-black">-{formatPrice(appliedCoupon.discount_amount)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>折扣後金額</span>
+              <span className="font-black">{formatPrice(appliedCoupon.final_total)}</span>
+            </div>
+          </>
+        ) : null}
         <div className="flex justify-between"><span>運費</span><span>{formatPrice(shipping)}</span></div>
         <div className="flex justify-between border-t pt-2 text-base font-black"><span>總計</span><span>{formatPrice(total)}</span></div>
       </CardContent>

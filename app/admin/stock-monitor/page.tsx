@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { deferClientUpdate } from "@/lib/react/defer-client-update";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import type { StockMonitorProduct } from "@/lib/types/stock-monitor";
 
@@ -62,6 +61,22 @@ function getCheckStatusLabel(status: string | null | undefined): string {
   }
 }
 
+function resolveLoadErrorMessage(
+  response: Response,
+  data: { error?: string }
+): string {
+  if (response.status === 429) {
+    return "Xano 請求過於頻繁，請稍候 20 秒再重試。";
+  }
+
+  const message = data.error || "讀取失敗";
+  if (message.includes("429")) {
+    return "Xano 請求過於頻繁，請稍候 20 秒再重試。";
+  }
+
+  return message;
+}
+
 function getStockStatusLabel(status: string | null | undefined): string {
   switch (status) {
     case "in_stock":
@@ -78,9 +93,11 @@ function getStockStatusLabel(status: string | null | undefined): string {
 export default function StockMonitorPage() {
   const [products, setProducts] = useState<StockMonitorProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadSucceeded, setLoadSucceeded] = useState(false);
   const [error, setError] = useState("");
   const [checkingId, setCheckingId] = useState<number | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
+  const loadProductsInFlightRef = useRef(false);
 
   const showToast = useCallback((message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -90,6 +107,11 @@ export default function StockMonitorPage() {
   }, []);
 
   const loadProducts = useCallback(async () => {
+    if (loadProductsInFlightRef.current) {
+      return;
+    }
+
+    loadProductsInFlightRef.current = true;
     setLoading(true);
     setError("");
 
@@ -98,23 +120,23 @@ export default function StockMonitorPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || "讀取失敗");
-        setProducts([]);
+        setError(resolveLoadErrorMessage(response, data));
         return;
       }
 
       const list = Array.isArray(data.products) ? data.products : [];
       setProducts(list);
+      setLoadSucceeded(true);
     } catch {
       setError("網路錯誤，請稍後再試");
-      setProducts([]);
     } finally {
+      loadProductsInFlightRef.current = false;
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    deferClientUpdate(() => {
+    queueMicrotask(() => {
       void loadProducts();
     });
   }, [loadProducts]);
@@ -132,7 +154,7 @@ export default function StockMonitorPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        showToast(data.error || "檢查失敗", "error");
+        showToast(resolveLoadErrorMessage(response, data), "error");
         return;
       }
 
@@ -157,7 +179,6 @@ export default function StockMonitorPage() {
       }
 
       showToast(data.message || "檢查完成，已更新監控資料", "success");
-      await loadProducts();
     } catch {
       showToast("網路錯誤，請稍後再試", "error");
     } finally {
@@ -181,11 +202,17 @@ export default function StockMonitorPage() {
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <p className="text-sm text-neutral-500">共 {products.length} 筆監控商品</p>
+          <p className="text-sm text-neutral-500">
+            {loadSucceeded || products.length > 0
+              ? `共 ${products.length} 筆監控商品`
+              : error
+                ? "監控列表載入失敗"
+                : "載入監控列表中..."}
+          </p>
           <button
             type="button"
             onClick={() => void loadProducts()}
-            disabled={loading || checkingId !== null}
+            disabled={loading}
             className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-bold text-neutral-700 disabled:opacity-50"
           >
             重新整理
@@ -204,14 +231,14 @@ export default function StockMonitorPage() {
           </div>
         )}
 
-        {!loading && !error && products.length === 0 && (
+        {!loading && loadSucceeded && !error && products.length === 0 && (
           <div className="rounded-3xl border border-neutral-100 bg-neutral-50 p-8 text-center text-sm text-neutral-500">
             尚無監控商品。請先匯入含 source_url 的商品。
           </div>
         )}
 
         {!loading &&
-          !error &&
+          products.length > 0 &&
           products.map((product) => {
             const imageUrl = getProductImage(product);
 

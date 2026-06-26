@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { badRequestResponse, serverErrorResponse } from "@/lib/auth/require-admin";
 
 const DEFAULT_UPDATE_LOOKBOOK_FAVORITE_COUNT_URL =
@@ -12,6 +13,7 @@ function resolveUpdateLookbookFavoriteCountUrl(): string | null {
 type LookbookFavoriteCountBody = {
   lookbook_id?: number;
   action?: string;
+  delta?: number;
 };
 
 export async function POST(request: NextRequest) {
@@ -38,10 +40,17 @@ export async function POST(request: NextRequest) {
     return serverErrorResponse("XANO_UPDATE_LOOKBOOK_FAVORITE_COUNT_URL 未設定");
   }
 
-  const xanoPayload = {
+  const xanoPayload: Record<string, unknown> = {
     lookbook_id: lookbookId,
     action,
   };
+
+  if (action === "add" && body.delta != null) {
+    xanoPayload.delta = body.delta;
+  }
+
+  // Xano update-lookbook-favorite-count: action "add" → favorite_count += input.delta;
+  // J-GO 前端取消收藏不呼叫此 API；action "remove" 不應扣減 favorite_count。
 
   try {
     const response = await fetch(updateUrl, {
@@ -52,6 +61,17 @@ export async function POST(request: NextRequest) {
 
     const responseText = await response.text();
 
+    if (response.status === 429) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "目前操作太頻繁，請稍後再試收藏。",
+          status: 429,
+        },
+        { status: 429 }
+      );
+    }
+
     if (!response.ok) {
       if (responseText.includes("Unable to locate request")) {
         return serverErrorResponse(
@@ -59,7 +79,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      return serverErrorResponse(`更新穿搭收藏數失敗：${responseText}`);
+      return NextResponse.json(
+        {
+          success: false,
+          message: "更新穿搭收藏數失敗",
+          status: response.status,
+          xanoResponse: responseText,
+        },
+        { status: response.status >= 400 && response.status < 600 ? response.status : 500 }
+      );
     }
 
     let xanoResult: Record<string, unknown> = {};
@@ -70,6 +98,10 @@ export async function POST(request: NextRequest) {
         xanoResult = {};
       }
     }
+
+    revalidatePath("/");
+    revalidatePath("/api/lookbooks");
+    revalidatePath("/api/rankings/lookbooks");
 
     return NextResponse.json({
       success: true,

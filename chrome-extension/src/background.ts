@@ -29,6 +29,24 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
   }
 }
 
+function sanitizeSyncProductStockPayload(
+  payload: SyncProductStockPayload
+): SyncProductStockPayload {
+  const currentJpyPrice = payload.current_jpy_price;
+  const roundedPrice = Math.round(Number(currentJpyPrice));
+  const hasValidPrice = Number.isFinite(roundedPrice) && roundedPrice > 0;
+
+  if (!hasValidPrice) {
+    const { current_jpy_price: _ignored, ...rest } = payload;
+    return rest;
+  }
+
+  return {
+    ...payload,
+    current_jpy_price: roundedPrice,
+  };
+}
+
 async function importProduct(payload: ImportProductPayload): Promise<BackgroundResponse> {
   const apiBaseUrl = await getApiBaseUrl();
 
@@ -59,6 +77,7 @@ async function importProduct(payload: ImportProductPayload): Promise<BackgroundR
 
 async function syncProductStock(payload: SyncProductStockPayload): Promise<BackgroundResponse> {
   const apiBaseUrl = await getApiBaseUrl();
+  const sanitizedPayload = sanitizeSyncProductStockPayload(payload);
 
   try {
     const response = await fetch(`${apiBaseUrl}/api/admin-sync-product-stock`, {
@@ -66,7 +85,7 @@ async function syncProductStock(payload: SyncProductStockPayload): Promise<Backg
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(sanitizedPayload),
     });
 
     const data = await readJsonResponse<SyncProductStockResponse>(response);

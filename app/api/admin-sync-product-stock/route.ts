@@ -7,7 +7,8 @@ import {
 } from "@/lib/auth/require-admin";
 import { deriveVariantsListUrl } from "@/lib/products/merge-product-variants";
 import {
-  calculateSyncTwdPrice,
+  buildProductPriceUpdatePayload,
+  buildProductStockStatusPayload,
   fetchPricingSettings,
   parseCurrentJpyPrice,
   resolveLastStockStatusFromVariants,
@@ -171,32 +172,10 @@ async function updateVariantStock(
   };
 }
 
-async function updateProductPriceAndStatus(
+async function postUpdateProductStock(
   updateUrl: string,
-  productId: number,
-  currentJpyPrice: number,
-  normalizedVariantStock: VariantStockEntry[]
-): Promise<{ ok: boolean; newPrice: number; body: string }> {
-  const settings = await fetchPricingSettings();
-  const newPrice = calculateSyncTwdPrice(currentJpyPrice, settings);
-  const lastStockStatus = resolveLastStockStatusFromVariants(normalizedVariantStock);
-
-  console.log("SYNC PRICE", {
-    product_id: productId,
-    current_jpy_price: currentJpyPrice,
-    newPrice,
-  });
-
-  const payload = {
-    product_id: productId,
-    current_jpy_price: currentJpyPrice,
-    jpy_price: currentJpyPrice,
-    price: newPrice,
-    last_price_jpy: currentJpyPrice,
-    last_stock_status: lastStockStatus,
-    check_status: "ok",
-  };
-
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; body: string }> {
   console.log("UPDATE PRODUCT STOCK PAYLOAD", payload);
 
   const response = await fetch(updateUrl, {
@@ -206,13 +185,63 @@ async function updateProductPriceAndStatus(
   });
 
   const body = await response.text();
-  console.log("XANO UPDATE PRODUCT STOCK RESPONSE", productId, response.status, body);
+  console.log("XANO UPDATE PRODUCT STOCK RESPONSE", payload.product_id, response.status, body);
 
   return {
     ok: response.ok,
-    newPrice,
     body,
   };
+}
+
+async function updateProductPriceAndStatus(
+  updateUrl: string,
+  productId: number,
+  currentJpyPrice: number,
+  normalizedVariantStock: VariantStockEntry[]
+): Promise<{ ok: boolean; newPrice: number | null; body: string }> {
+  const settings = await fetchPricingSettings();
+  const lastStockStatus = resolveLastStockStatusFromVariants(normalizedVariantStock);
+  const payload = buildProductPriceUpdatePayload({
+    productId,
+    currentJpyPrice,
+    settings,
+    lastStockStatus,
+  });
+
+  if (!payload) {
+    return {
+      ok: false,
+      newPrice: null,
+      body: "換算後台幣售價無效，已略過價格更新",
+    };
+  }
+
+  console.log("SYNC PRICE", {
+    product_id: productId,
+    current_jpy_price: currentJpyPrice,
+    newPrice: payload.price,
+  });
+
+  const result = await postUpdateProductStock(updateUrl, payload);
+
+  return {
+    ok: result.ok,
+    newPrice: Number(payload.price),
+    body: result.body,
+  };
+}
+
+async function updateProductStockStatusOnly(
+  updateUrl: string,
+  productId: number,
+  normalizedVariantStock: VariantStockEntry[]
+): Promise<{ ok: boolean; body: string }> {
+  const payload = buildProductStockStatusPayload(
+    productId,
+    resolveLastStockStatusFromVariants(normalizedVariantStock)
+  );
+
+  return postUpdateProductStock(updateUrl, payload);
 }
 
 export async function POST(request: NextRequest) {
@@ -243,6 +272,8 @@ export async function POST(request: NextRequest) {
   }
 
   const currentJpyPrice = parseCurrentJpyPrice(body.current_jpy_price);
+  // Price fields are sent to Xano only when currentJpyPrice > 0 (see buildProductPriceUpdatePayload).
+  // Stock-only sync uses buildProductStockStatusPayload (no price / jpy_price / last_price_jpy).
 
   const updateVariantUrl =
     process.env.XANO_UPDATE_VARIANT_STOCK_URL || DEFAULT_UPDATE_VARIANT_STOCK_URL;
@@ -288,7 +319,7 @@ export async function POST(request: NextRequest) {
     let syncedPrice: number | null = null;
     let priceSyncError: string | undefined;
 
-    if (currentJpyPrice) {
+    if (currentJpyPrice !== null) {
       const priceResult = await updateProductPriceAndStatus(
         updateProductUrl,
         productId,
@@ -296,18 +327,38 @@ export async function POST(request: NextRequest) {
         normalizedVariantStock
       );
 
-      if (priceResult.ok) {
+      if (priceResult.ok && priceResult.newPrice != null) {
         priceSynced = true;
         syncedPrice = priceResult.newPrice;
       } else {
         priceSyncError = priceResult.body || "更新商品價格失敗";
         console.warn("SYNC PRICE UPDATE FAILED", priceSyncError);
+
+        const stockStatusResult = await updateProductStockStatusOnly(
+          updateProductUrl,
+          productId,
+          normalizedVariantStock
+        );
+
+        if (!stockStatusResult.ok) {
+          console.warn("SYNC STOCK STATUS UPDATE FAILED", stockStatusResult.body);
+        }
       }
     } else {
       console.log("SYNC PRICE SKIPPED", {
         product_id: productId,
         current_jpy_price: body.current_jpy_price ?? null,
       });
+
+      const stockStatusResult = await updateProductStockStatusOnly(
+        updateProductUrl,
+        productId,
+        normalizedVariantStock
+      );
+
+      if (!stockStatusResult.ok) {
+        console.warn("SYNC STOCK STATUS UPDATE FAILED", stockStatusResult.body);
+      }
     }
 
     return NextResponse.json({
@@ -320,9 +371,11 @@ export async function POST(request: NextRequest) {
       price: syncedPrice ?? undefined,
       price_sync_error: priceSyncError,
       message:
-        priceSynced && syncedPrice != null
+        priceSynced && syncedPrice != null && currentJpyPrice != null
           ? `已同步 ${syncedCount} 個尺寸庫存，日幣 ${currentJpyPrice} → 台幣 ${syncedPrice}`
-          : `已同步 ${syncedCount} 個尺寸庫存`,
+          : priceSyncError
+            ? `已同步 ${syncedCount} 個尺寸庫存（${priceSyncError}）`
+            : `已同步 ${syncedCount} 個尺寸庫存`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "同步庫存失敗";
