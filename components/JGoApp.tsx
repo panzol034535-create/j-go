@@ -1641,7 +1641,11 @@ export default function JGoApp({
   const featuredProduct = catalogFilteredProducts[0] || products[0];
 
   const shipping = subtotal > 0 ? 60 : 0;
-  const total = subtotal + shipping;
+  const discountAmount = appliedCoupon?.discount_amount ?? 0;
+  const discountedSubtotal = appliedCoupon
+    ? Math.max(0, subtotal - discountAmount)
+    : subtotal;
+  const payableTotal = discountedSubtotal + shipping;
 
   useEffect(() => {
     if (cartCouponResetRef.current) {
@@ -1802,9 +1806,9 @@ export default function JGoApp({
         color: item.color,
         size: item.size,
       })),
-      total
+      payableTotal
     );
-  }, [mounted, tab, cart, total]);
+  }, [mounted, tab, cart, payableTotal]);
 
   useEffect(() => {
     if (!mounted || tab !== "shop") return;
@@ -2509,12 +2513,6 @@ export default function JGoApp({
 
     setIsSubmitting(true);
 
-    const subtotal_price = subtotal;
-    const discount_amount = appliedCoupon?.discount_amount ?? 0;
-    const discounted_subtotal = appliedCoupon
-      ? Math.max(0, subtotal_price - discount_amount)
-      : subtotal_price;
-
     try {
       const response = await fetch(XANO_CHECKOUT_URL, {
         method: "POST",
@@ -2526,12 +2524,12 @@ export default function JGoApp({
           customer_email: checkoutForm.email,
           customer_phone: checkoutForm.phone,
           delivery_method: delivery,
-          total_price: total,
-          subtotal_price,
+          total_price: payableTotal,
+          subtotal_price: subtotal,
           coupon_id: appliedCoupon?.coupon_id ?? null,
           coupon_code: appliedCoupon?.code ?? "",
-          discount_amount,
-          discounted_subtotal,
+          discount_amount: discountAmount,
+          discounted_subtotal: discountedSubtotal,
           pickup_store_name: pickupStore.store_name,
           pickup_store_code: pickupStore.store_id,
           pickup_store_address: pickupStore.address,
@@ -2557,7 +2555,7 @@ export default function JGoApp({
           order_id: data.id,
           customer_name: checkoutForm.name,
           customer_email: checkoutForm.email,
-          total_price: total,
+          total_price: payableTotal,
         }),
       });
 
@@ -2661,7 +2659,7 @@ export default function JGoApp({
           unit_price: item.price,
           subtotal: item.price * item.qty,
         })),
-        total,
+        total: payableTotal,
         delivery,
         pickupStore,
         shippingAddress,
@@ -3942,7 +3940,8 @@ export default function JGoApp({
                   <PriceBox
                     subtotal={subtotal}
                     shipping={shipping}
-                    total={total}
+                    discountedSubtotal={discountedSubtotal}
+                    payableTotal={payableTotal}
                     appliedCoupon={appliedCoupon}
                   />
                   <Button onClick={() => {
@@ -4068,7 +4067,8 @@ export default function JGoApp({
               <PriceBox
                 subtotal={subtotal}
                 shipping={shipping}
-                total={total}
+                discountedSubtotal={discountedSubtotal}
+                payableTotal={payableTotal}
                 appliedCoupon={appliedCoupon}
               />
               <Button onClick={submitOrder} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">
@@ -5419,12 +5419,14 @@ function CouponCheckoutSection({
 function PriceBox({
   subtotal,
   shipping,
-  total,
+  discountedSubtotal,
+  payableTotal,
   appliedCoupon = null,
 }: {
   subtotal: number;
   shipping: number;
-  total: number;
+  discountedSubtotal: number;
+  payableTotal: number;
   appliedCoupon?: AppliedCoupon | null;
 }) {
   return (
@@ -5443,12 +5445,12 @@ function PriceBox({
             </div>
             <div className="flex justify-between">
               <span>折扣後金額</span>
-              <span className="font-black">{formatPrice(appliedCoupon.final_total)}</span>
+              <span className="font-black">{formatPrice(discountedSubtotal)}</span>
             </div>
           </>
         ) : null}
         <div className="flex justify-between"><span>運費</span><span>{formatPrice(shipping)}</span></div>
-        <div className="flex justify-between border-t pt-2 text-base font-black"><span>總計</span><span>{formatPrice(total)}</span></div>
+        <div className="flex justify-between border-t pt-2 text-base font-black"><span>總計</span><span>{formatPrice(payableTotal)}</span></div>
       </CardContent>
     </Card>
   );
