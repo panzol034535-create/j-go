@@ -1740,7 +1740,12 @@ export default function JGoApp({
       const response = await fetch("/api/validate-coupon", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, subtotal }),
+        body: JSON.stringify({
+          code,
+          subtotal,
+          customer_email: currentUser?.email ?? "",
+          clerk_user_id: user?.id ?? currentUser?.id ?? "",
+        }),
       });
 
       const data = (await response.json()) as {
@@ -2550,6 +2555,7 @@ export default function JGoApp({
           customer_name: checkoutForm.name,
           customer_email: checkoutForm.email,
           customer_phone: checkoutForm.phone,
+          clerk_user_id: user?.id ?? currentUser?.id ?? "",
           delivery_method: delivery,
           total_price: payableTotal,
           subtotal_price: subtotal,

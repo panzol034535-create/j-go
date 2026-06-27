@@ -12,6 +12,8 @@ function resolveValidateCouponUrl(): string {
 type ValidateCouponBody = {
   code?: string;
   subtotal?: number;
+  customer_email?: string;
+  clerk_user_id?: string;
 };
 
 export async function POST(request: NextRequest) {
@@ -33,11 +35,19 @@ export async function POST(request: NextRequest) {
     return badRequestResponse("subtotal 必須是大於 0 的數字");
   }
 
+  const customerEmail = String(body.customer_email ?? "").trim();
+  const clerkUserId = String(body.clerk_user_id ?? "").trim();
+
   try {
     const response = await fetch(resolveValidateCouponUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, subtotal }),
+      body: JSON.stringify({
+        code,
+        subtotal,
+        customer_email: customerEmail,
+        clerk_user_id: clerkUserId,
+      }),
     });
 
     const text = await response.text();
