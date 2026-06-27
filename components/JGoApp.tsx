@@ -2819,11 +2819,23 @@ export default function JGoApp({
             <div className="flex items-center gap-2">
             <button
               onClick={() => setTab("account")}
-              className="rounded-full border border-neutral-200 p-3 text-neutral-700"
+              className="rounded-full border border-neutral-200 bg-white p-3 text-neutral-700 transition hover:bg-neutral-50 active:scale-[0.98] active:bg-neutral-100"
+              aria-label="我的帳號"
             >
               <User size={20} />
             </button>
-            <button onClick={() => setTab("cart")} className="relative rounded-full bg-neutral-900 p-3 text-white">
+            <button
+              onClick={() => setTab("ai-support")}
+              className="h-12 w-12 overflow-hidden rounded-full border border-neutral-200 bg-white transition hover:bg-neutral-50 active:scale-[0.98] active:bg-neutral-100"
+              aria-label="AI 客服"
+            >
+              <img
+                src="/images/ai-robot.png"
+                alt="AI 客服"
+                className="h-full w-full object-cover object-top"
+              />
+            </button>
+            <button onClick={() => setTab("cart")} className="relative rounded-full bg-neutral-900 p-3 text-white" aria-label="購物車">
               <ShoppingBag size={20} />
               {mounted && cart.length > 0 && (
                 <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-xs">{cart.length}</span>
