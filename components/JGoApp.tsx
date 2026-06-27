@@ -3,7 +3,7 @@
 import React, { useMemo, useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
-import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles, ChevronDown, Heart, ShieldCheck, Clock } from "lucide-react";
+import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles, ChevronDown, Heart, ShieldCheck, Clock, MessageCircle, Send } from "lucide-react";
 import {
   findFirstSelectableSize,
   getProductColorOptions,
@@ -79,6 +79,7 @@ import {
 import { formatLookbookList, type FormattedLookbook } from "@/lib/lookbooks/format-lookbook-list";
 import { formatXanoProducts, type FormattedXanoProduct } from "@/lib/products/format-xano-product";
 import { hasInitialRankings, type InitialRankings } from "@/lib/home-initial-data";
+import { AI_SUPPORT_FAQ_ITEMS, JGO_HUMAN_SUPPORT } from "@/lib/support-contacts";
 import type { HomePageData } from "@/lib/server/home-data";
 import type {
   AppliedCoupon,
@@ -545,6 +546,11 @@ export default function JGoApp({
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
   const [couponError, setCouponError] = useState("");
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
+  const [supportMessages, setSupportMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([]);
+  const [supportInput, setSupportInput] = useState("");
+  const [isSupportSending, setIsSupportSending] = useState(false);
+  const [supportError, setSupportError] = useState("");
+  const supportChatEndRef = useRef<HTMLDivElement | null>(null);
   const cartCouponResetRef = useRef(true);
   const couponRestoredRef = useRef(false);
   const [lookbookForm, setLookbookForm] = useState({
@@ -1797,6 +1803,52 @@ export default function JGoApp({
       setIsApplyingCoupon(false);
     }
   };
+
+  const sendSupportMessage = async (rawMessage: string) => {
+    const message = rawMessage.trim();
+    if (!message || isSupportSending) {
+      return;
+    }
+
+    setSupportError("");
+    setSupportInput("");
+    setSupportMessages((previous) => [...previous, { role: "user", text: message }]);
+    setIsSupportSending(true);
+
+    try {
+      const response = await fetch("/api/ai-support", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+
+      const data = (await response.json()) as {
+        success?: boolean;
+        reply?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !data.success || !data.reply) {
+        throw new Error(data.error || "AI 客服暫時無法回覆，請稍後再試");
+      }
+
+      setSupportMessages((previous) => [...previous, { role: "assistant", text: data.reply! }]);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "AI 客服暫時無法回覆，請稍後再試";
+      setSupportError(errorMessage);
+    } finally {
+      setIsSupportSending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab !== "ai-support") {
+      return;
+    }
+
+    supportChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [supportMessages, tab, isSupportSending]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -4110,6 +4162,24 @@ export default function JGoApp({
             </motion.div>
           )}
 
+          {tab === "ai-support" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <button onClick={() => setTab("account")} className="text-sm font-bold text-neutral-500">
+                ← 返回
+              </button>
+              <AiSupportPanel
+                messages={supportMessages}
+                input={supportInput}
+                error={supportError}
+                isSending={isSupportSending}
+                chatEndRef={supportChatEndRef}
+                onInputChange={setSupportInput}
+                onSend={() => void sendSupportMessage(supportInput)}
+                onQuickQuestion={(question) => void sendSupportMessage(question)}
+              />
+            </motion.div>
+          )}
+
           {tab === "account" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
               <h2 className="text-2xl font-black">我的帳號</h2>
@@ -4144,6 +4214,16 @@ export default function JGoApp({
                       </Button>
                     )}
 
+                    <Button
+                      onClick={() => setTab("ai-support")}
+                      className="h-12 w-full rounded-2xl border border-neutral-200 bg-white text-base text-neutral-900"
+                    >
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <MessageCircle size={18} />
+                        AI 客服中心
+                      </span>
+                    </Button>
+
                     <div className="flex items-center justify-between rounded-2xl bg-neutral-50 px-4 py-3">
                       <span className="text-sm font-black text-neutral-600">帳號設定 / 登出</span>
                       <UserButton />
@@ -4172,6 +4252,16 @@ export default function JGoApp({
                         建立新帳號
                       </button>
                     </SignUpButton>
+
+                    <Button
+                      onClick={() => setTab("ai-support")}
+                      className="h-12 w-full rounded-2xl border border-neutral-200 bg-white text-base text-neutral-900"
+                    >
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <MessageCircle size={18} />
+                        AI 客服中心
+                      </span>
+                    </Button>
                   </CardContent>
                 </Card>
               )}
@@ -5491,6 +5581,153 @@ function PriceBox({
         <div className="flex justify-between border-t pt-2 text-base font-black"><span>總計</span><span>{formatPrice(payableTotal)}</span></div>
       </CardContent>
     </Card>
+  );
+}
+
+function AiSupportPanel({
+  messages,
+  input,
+  error,
+  isSending,
+  chatEndRef,
+  onInputChange,
+  onSend,
+  onQuickQuestion,
+}: {
+  messages: Array<{ role: "user" | "assistant"; text: string }>;
+  input: string;
+  error: string;
+  isSending: boolean;
+  chatEndRef: React.RefObject<HTMLDivElement | null>;
+  onInputChange: (value: string) => void;
+  onSend: () => void;
+  onQuickQuestion: (question: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-2xl font-black">AI 客服</h2>
+        <p className="mt-1 text-sm text-neutral-500">可先詢問常見問題，複雜問題請聯絡人工客服。</p>
+      </div>
+
+      <Card className="rounded-3xl border-neutral-100 shadow-sm">
+        <CardContent className="space-y-3 p-4">
+          <p className="text-xs font-black tracking-widest text-neutral-400">常見問題</p>
+          <div className="flex flex-wrap gap-2">
+            {AI_SUPPORT_FAQ_ITEMS.map((question) => (
+              <button
+                key={question}
+                type="button"
+                disabled={isSending}
+                onClick={() => onQuickQuestion(question)}
+                className="rounded-full border border-neutral-200 bg-white px-3 py-2 text-left text-xs font-bold text-neutral-700 transition hover:border-neutral-900 disabled:opacity-60"
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-3xl border-neutral-100 shadow-sm">
+        <CardContent className="flex min-h-[320px] flex-col p-4">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            {messages.length === 0 ? (
+              <div className="rounded-2xl bg-neutral-50 px-4 py-3 text-sm leading-6 text-neutral-600">
+                你好，我是 J-GO AI 客服。可以選擇上方常見問題，或直接輸入想詢問的內容。
+              </div>
+            ) : null}
+            {messages.map((message, index) => (
+              <div
+                key={`${message.role}-${index}-${message.text.slice(0, 24)}`}
+                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-6 ${
+                    message.role === "user"
+                      ? "bg-neutral-900 text-white"
+                      : "bg-neutral-100 text-neutral-800"
+                  }`}
+                >
+                  {message.text}
+                </div>
+              </div>
+            ))}
+            {isSending ? (
+              <div className="flex justify-start">
+                <div className="rounded-2xl bg-neutral-100 px-4 py-3 text-sm font-bold text-neutral-500">
+                  回覆中...
+                </div>
+              </div>
+            ) : null}
+            <div ref={chatEndRef} />
+          </div>
+
+          {error ? <p className="text-sm font-bold text-red-500">{error}</p> : null}
+
+          <div className="mt-4 flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(event) => onInputChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  onSend();
+                }
+              }}
+              placeholder="輸入問題..."
+              disabled={isSending}
+              className="h-11 min-w-0 flex-1 rounded-2xl border border-neutral-200 bg-white px-4 text-sm font-bold text-neutral-900 outline-none placeholder:font-medium placeholder:text-neutral-400 disabled:opacity-60"
+            />
+            <Button
+              onClick={onSend}
+              disabled={isSending || !input.trim()}
+              className="h-11 shrink-0 rounded-2xl bg-neutral-900 px-4 text-sm"
+            >
+              <span className="inline-flex items-center gap-1">
+                <Send size={16} />
+                送出
+              </span>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-3xl border-neutral-100 bg-neutral-50 shadow-sm">
+        <CardContent className="space-y-3 p-4">
+          <p className="text-sm font-black text-neutral-900">人工客服</p>
+          <p className="text-xs leading-5 text-neutral-500">
+            訂單、退款、取消或物流異常，請透過以下方式聯絡我們。
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            <a
+              href={JGO_HUMAN_SUPPORT.line.href}
+              target="_blank"
+              rel="noreferrer"
+              className="flex h-12 items-center justify-center rounded-2xl border border-neutral-200 bg-white text-xs font-black text-neutral-900"
+            >
+              {JGO_HUMAN_SUPPORT.line.label}
+            </a>
+            <a
+              href={JGO_HUMAN_SUPPORT.instagram.href}
+              target="_blank"
+              rel="noreferrer"
+              className="flex h-12 items-center justify-center rounded-2xl border border-neutral-200 bg-white text-xs font-black text-neutral-900"
+            >
+              {JGO_HUMAN_SUPPORT.instagram.label}
+            </a>
+            <a
+              href={JGO_HUMAN_SUPPORT.email.href}
+              className="flex h-12 items-center justify-center rounded-2xl border border-neutral-200 bg-white px-2 text-xs font-black text-neutral-900"
+            >
+              {JGO_HUMAN_SUPPORT.email.label}
+            </a>
+          </div>
+          <p className="text-center text-xs text-neutral-500">{JGO_HUMAN_SUPPORT.email.display}</p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
