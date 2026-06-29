@@ -15,6 +15,16 @@ export const clerkLocalization = {
       actionText: "已經有帳號？",
       actionLink: "立即登入",
     },
+    emailCode: {
+      title: "驗證您的 Email",
+      subtitle: "請輸入寄送到您 Email 的驗證碼",
+      formSubtitle: "請輸入寄送到您 Email 的驗證碼",
+      resendButton: "沒收到驗證碼？重新寄送",
+    },
+    emailLink: {
+      title: "驗證您的 Email",
+      resendButton: "沒收到驗證碼？重新寄送",
+    },
   },
   socialButtonsBlockButton: "使用 {{provider|titleize}} 登入",
   formButtonPrimary: "繼續",

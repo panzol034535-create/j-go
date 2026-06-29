@@ -292,7 +292,6 @@ const XANO_ADD_ORDER_ITEM_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/
 const XANO_GET_ORDERS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/Get_Orders";
 const XANO_GET_ORDER_ITEMS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/order-items";
 const XANO_CREATE_ECPAY_ORDER_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-ecpay-order";
-const XANO_CREATE_CVS_MAP_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/create-cvs-map";
 const XANO_DECREASE_STOCK_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/decrease-stock";
 const XANO_LOOKBOOKS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/lookbooks";
 const XANO_UPDATE_ORDER_SHIPPING_STATUS_URL = "https://x8ki-letl-twmt.n7.xano.io/api:pVi32Dp4/update-order-shipping-status";
@@ -425,6 +424,22 @@ function isStoredCouponValid(
 
   const expectedFinalTotal = Math.max(0, currentSubtotal - coupon.discount_amount);
   return coupon.final_total === expectedFinalTotal;
+}
+
+type ClerkUserResource = NonNullable<ReturnType<typeof useUser>["user"]>;
+
+function buildJGoUserFromClerk(clerkUser: ClerkUserResource): JGoUser {
+  const metadata = clerkUser.unsafeMetadata as { jgoName?: unknown; jgoPhone?: unknown };
+  const metadataName = typeof metadata.jgoName === "string" ? metadata.jgoName.trim() : "";
+  const metadataPhone = typeof metadata.jgoPhone === "string" ? metadata.jgoPhone.trim() : "";
+
+  return {
+    id: clerkUser.id,
+    name: metadataName || clerkUser.fullName || clerkUser.firstName || "J-GO 會員",
+    email: clerkUser.primaryEmailAddress?.emailAddress || "",
+    phone: metadataPhone || clerkUser.primaryPhoneNumber?.phoneNumber || "",
+    provider: "Clerk",
+  };
 }
 
 export default function JGoApp({
@@ -605,21 +620,13 @@ export default function JGoApp({
       return;
     }
 
-    const clerkUser: JGoUser = {
-      id: user.id,
-      name: user.fullName || user.firstName || "J-GO 會員",
-      email: user.primaryEmailAddress?.emailAddress || "",
-      phone: user.primaryPhoneNumber?.phoneNumber || "",
-      provider: "Clerk",
-    };
+    const clerkUser = buildJGoUserFromClerk(user);
 
-    
-      setCurrentUser(clerkUser);
-      localStorage.setItem("jgo_current_user", JSON.stringify(clerkUser));
-      setAccountForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
-      setCheckoutForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
-    
-  }, [isSignedIn, user?.id]);
+    setCurrentUser(clerkUser);
+    localStorage.setItem("jgo_current_user", JSON.stringify(clerkUser));
+    setAccountForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
+    setCheckoutForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
+  }, [isSignedIn, user?.id, user?.unsafeMetadata]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -2211,17 +2218,45 @@ export default function JGoApp({
     setTab("account");
   };
 
-  const saveAccount = () => {
-    const updatedUser = {
-      ...currentUser,
-      name: accountForm.name || "J-GO 會員",
-      email: accountForm.email || "demo@example.com",
-      phone: accountForm.phone || "0912345678",
-    };
-    setCurrentUser(updatedUser);
-    localStorage.setItem("jgo_current_user", JSON.stringify(updatedUser));
-    setCheckoutForm({ name: updatedUser.name, email: updatedUser.email, phone: updatedUser.phone });
-    alert("帳號資料已更新");
+  const saveAccount = async () => {
+    if (!user || !currentUser) {
+      return;
+    }
+
+    const name = accountForm.name.trim() || "J-GO 會員";
+    const phone = accountForm.phone.trim();
+
+    try {
+      await user.update({
+        firstName: name,
+        unsafeMetadata: {
+          ...(user.unsafeMetadata as Record<string, unknown>),
+          jgoName: name,
+          jgoPhone: phone,
+        },
+      });
+
+      if (typeof user.reload === "function") {
+        await user.reload();
+      }
+
+      const updatedUser: JGoUser = {
+        ...currentUser,
+        id: user.id,
+        name,
+        email: user.primaryEmailAddress?.emailAddress || currentUser.email,
+        phone,
+        provider: "Clerk",
+      };
+
+      setCurrentUser(updatedUser);
+      setAccountForm({ name: updatedUser.name, email: updatedUser.email, phone: updatedUser.phone });
+      setCheckoutForm({ name: updatedUser.name, email: updatedUser.email, phone: updatedUser.phone });
+      localStorage.setItem("jgo_current_user", JSON.stringify(updatedUser));
+      alert("帳號資料已更新");
+    } catch {
+      alert("帳號資料更新失敗，請稍後再試");
+    }
   };
 
   const logout = () => {
@@ -4079,7 +4114,7 @@ export default function JGoApp({
                     <Button
                       onClick={async () => {
                         try {
-                          const response = await fetch(XANO_CREATE_CVS_MAP_URL, {
+                          const response = await fetch("/api/create-cvs-map", {
                             method: "POST",
                             headers: {
                               "Content-Type": "application/json",
@@ -4117,7 +4152,7 @@ export default function JGoApp({
                             document.body.appendChild(form);
                             form.submit();
                           } else {
-                            throw new Error("Xano 沒有回傳 cvs_map_url");
+                            throw new Error("沒有回傳 cvs_map_url");
                           }
                         } catch (error) {
                           console.error(error);
@@ -4212,9 +4247,9 @@ export default function JGoApp({
                     <div className="space-y-3 rounded-3xl bg-neutral-50 p-4">
                       <h4 className="font-black">編輯會員資料</h4>
                       <Input label="姓名" placeholder="你的名字" value={accountForm.name} onChange={(value) => setAccountForm({ ...accountForm, name: value })} />
-                      <Input label="Gmail / Email" placeholder="hello@gmail.com" value={accountForm.email} onChange={(value) => setAccountForm({ ...accountForm, email: value })} icon={<Mail size={18} />} />
+                      <Input label="Gmail / Email" placeholder="hello@gmail.com" value={accountForm.email} icon={<Mail size={18} />} disabled />
                       <Input label="手機號碼" placeholder="0912345678" value={accountForm.phone} onChange={(value) => setAccountForm({ ...accountForm, phone: value })} />
-                      <Button onClick={saveAccount} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">儲存資料</Button>
+                      <Button onClick={() => void saveAccount()} className="h-12 w-full rounded-2xl bg-neutral-900 text-base">儲存資料</Button>
                     </div>
 
                     {isAdmin && (
@@ -5462,24 +5497,27 @@ function TextArea({ label, placeholder, value, onChange }) {
   );
 }
 
-function Input({ label, placeholder, value, onChange, type = "text", icon }: {
+function Input({ label, placeholder, value, onChange, type = "text", icon, disabled = false }: {
   label: string;
   placeholder?: string;
   value: string;
   onChange?: (value: string) => void;
   type?: string;
   icon?: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <label className="block">
       <span className="mb-1 block text-sm font-bold">{label}</span>
-      <div className="flex h-12 items-center gap-2 rounded-2xl border border-neutral-200 px-4 focus-within:border-neutral-900">
+      <div className={`flex h-12 items-center gap-2 rounded-2xl border border-neutral-200 px-4 ${disabled ? "bg-neutral-50" : "focus-within:border-neutral-900"}`}>
         {icon && <span className="text-neutral-400">{icon}</span>}
         <input
-          className="h-full flex-1 bg-transparent outline-none"
+          className="h-full flex-1 bg-transparent outline-none disabled:cursor-not-allowed disabled:text-neutral-500"
           placeholder={placeholder}
           type={type}
           value={value}
+          disabled={disabled}
+          readOnly={disabled}
           onChange={(e) => onChange?.(e.target.value)}
         />
       </div>
