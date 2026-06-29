@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { badRequestResponse, serverErrorResponse } from "@/lib/auth/require-admin";
 
-const DEFAULT_MAP_URL = "https://logistics-stage.ecpay.com.tw/Express/map";
+const DEFAULT_MAP_URL = "https://logistics.ecpay.com.tw/Express/map";
 const DEFAULT_SITE_URL = "https://j-go-xd5a.vercel.app";
 
 function resolveMapUrl(): string {
@@ -25,7 +25,15 @@ function generateCheckMacValue(
     .map((key) => `${key}=${params[key]}`)
     .join("&");
   const raw = `HashKey=${hashKey}&${sortedParams}&HashIV=${hashIV}`;
-  const encoded = encodeURIComponent(raw).toLowerCase();
+  const encoded = encodeURIComponent(raw)
+    .toLowerCase()
+    .replace(/%20/g, "+")
+    .replace(/!/g, "%21")
+    .replace(/\*/g, "%2a")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29")
+    .replace(/'/g, "%27")
+    .replace(/~/g, "%7e");
 
   return createHash("md5").update(encoded).digest("hex").toUpperCase();
 }
