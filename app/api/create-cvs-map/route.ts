@@ -64,13 +64,16 @@ export async function POST(request: NextRequest) {
   const siteUrl = resolveSiteUrl();
   const logisticsSubType =
     String(body.logistics_sub_type ?? "UNIMART").trim() || "UNIMART";
+  const merchantTradeNo = `JGO${Date.now()}`;
 
   const params = {
     MerchantID: merchantId,
+    MerchantTradeNo: merchantTradeNo,
     LogisticsType: "CVS",
     LogisticsSubType: logisticsSubType,
     IsCollection: "N",
     ServerReplyURL: `${siteUrl}/api/cvs-callback`,
+    Device: "0",
   };
 
   const checkMacValue = generateCheckMacValue(params, hashKey, hashIV);
