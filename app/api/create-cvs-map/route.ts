@@ -28,12 +28,13 @@ function generateCheckMacValue(
   const encoded = encodeURIComponent(raw)
     .toLowerCase()
     .replace(/%20/g, "+")
-    .replace(/!/g, "%21")
-    .replace(/\*/g, "%2a")
-    .replace(/\(/g, "%28")
-    .replace(/\)/g, "%29")
-    .replace(/'/g, "%27")
-    .replace(/~/g, "%7e");
+    .replace(/%2d/g, "-")
+    .replace(/%5f/g, "_")
+    .replace(/%2e/g, ".")
+    .replace(/%21/g, "!")
+    .replace(/%2a/g, "*")
+    .replace(/%28/g, "(")
+    .replace(/%29/g, ")");
 
   return createHash("md5").update(encoded).digest("hex").toUpperCase();
 }
