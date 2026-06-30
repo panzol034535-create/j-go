@@ -4120,7 +4120,8 @@ export default function JGoApp({
                               "Content-Type": "application/json",
                             },
                             body: JSON.stringify({
-                              logistics_sub_type: "UNIMART",
+                              // J-GO 使用 7-11 C2C 交貨便，故使用 UNIMARTC2C。
+                              logistics_sub_type: "UNIMARTC2C",
                             }),
                           });
 

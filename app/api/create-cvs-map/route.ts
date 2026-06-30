@@ -62,8 +62,9 @@ export async function POST(request: NextRequest) {
 
   const cvsMapUrl = resolveMapUrl();
   const siteUrl = resolveSiteUrl();
+  // J-GO 使用 7-11 C2C 交貨便，故使用 UNIMARTC2C。
   const logisticsSubType =
-    String(body.logistics_sub_type ?? "UNIMART").trim() || "UNIMART";
+    String(body.logistics_sub_type ?? "UNIMARTC2C").trim() || "UNIMARTC2C";
   const merchantTradeNo = `JGO${Date.now()}`;
 
   const params = {
