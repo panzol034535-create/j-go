@@ -80,36 +80,3 @@ export async function POST(request: NextRequest) {
     CheckMacValue: checkMacValue,
   });
 }
-
-export async function GET() {
-  const merchantId = process.env.ECPAY_LOGISTICS_MERCHANT_ID?.trim() ?? "";
-  const hashKey = process.env.ECPAY_LOGISTICS_HASH_KEY?.trim();
-  const hashIV = process.env.ECPAY_LOGISTICS_HASH_IV?.trim();
-  const cvsMapUrl = resolveMapUrl();
-  const siteUrl = resolveSiteUrl();
-
-  const params = {
-    MerchantID: merchantId,
-    LogisticsType: "CVS",
-    LogisticsSubType: "UNIMART",
-    IsCollection: "N",
-    ServerReplyURL: `${siteUrl}/api/cvs-callback`,
-  };
-
-  const checkMacValue =
-    merchantId && hashKey && hashIV
-      ? generateCheckMacValue(params, hashKey, hashIV)
-      : "";
-
-  return NextResponse.json({
-    cvs_map_url: cvsMapUrl,
-    MerchantID: merchantId,
-    LogisticsType: "CVS",
-    LogisticsSubType: "UNIMART",
-    IsCollection: "N",
-    ServerReplyURL: params.ServerReplyURL,
-    hasHashKey: Boolean(process.env.ECPAY_LOGISTICS_HASH_KEY),
-    hasHashIV: Boolean(process.env.ECPAY_LOGISTICS_HASH_IV),
-    hasCheckMacValue: Boolean(checkMacValue),
-  });
-}
