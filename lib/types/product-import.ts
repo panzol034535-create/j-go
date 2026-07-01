@@ -9,6 +9,7 @@ export type ZozoProductData = {
   description_jp: string;
   main_image: string;
   images: string[];
+  color_images?: Record<string, string[]>;
   colors: string[];
   sizes: string[];
 };

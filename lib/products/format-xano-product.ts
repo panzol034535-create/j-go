@@ -2,22 +2,50 @@ import {
   getProductColorOptions,
   getProductDescription,
   parseCommaList,
+  parseProductColorImages,
   parseProductVariants,
 } from "@/lib/products/product-fields";
 import { detectSourceSite } from "@/lib/products/source-site";
 import { parseSizeTableJson } from "@/lib/products/size-table-json";
 
+function parseProductImages(product: Record<string, unknown>): string[] {
+  const raw = product.images;
+
+  if (Array.isArray(raw)) {
+    return raw.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  if (typeof raw === "string" && raw.trim()) {
+    const trimmed = raw.trim();
+
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        if (Array.isArray(parsed)) {
+          return parsed.map((item) => String(item).trim()).filter(Boolean);
+        }
+      } catch {
+        // fall through to comma-separated parsing
+      }
+    }
+
+    return trimmed
+      .split(/[,，]/)
+      .map((url) => url.trim())
+      .filter(Boolean);
+  }
+
+  if (product.image) {
+    return [String(product.image).trim()].filter(Boolean);
+  }
+
+  return [];
+}
+
 export function formatXanoProducts(productList: Record<string, unknown>[]) {
   return productList.map((product) => {
-    const images = product.images
-      ? String(product.images)
-          .split(",")
-          .map((url) => url.trim())
-          .filter(Boolean)
-      : product.image
-        ? [String(product.image)]
-        : [];
-
+    const images = parseProductImages(product);
+    const color_images = parseProductColorImages(product.color_images);
     const variants = parseProductVariants(product);
 
     const source_url =
@@ -40,6 +68,7 @@ export function formatXanoProducts(productList: Record<string, unknown>[]) {
       compareAt: Number(product.compare_at) || 0,
       image: String(images[0] || product.image || ""),
       images,
+      color_images,
       colors: getProductColorOptions({ variants, colors: product.colors }),
       sizes: parseCommaList(product.sizes),
       variants,

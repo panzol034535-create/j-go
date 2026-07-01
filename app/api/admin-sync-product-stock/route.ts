@@ -14,8 +14,8 @@ import {
   resolveLastStockStatusFromVariants,
 } from "@/lib/products/sync-product-price";
 import {
-  normalizeColor,
   normalizeSize,
+  normalizeStoredColor,
   normalizeVariantStockEntries,
   type VariantStockEntry,
 } from "@/lib/products/variant-stock-normalize";
@@ -89,7 +89,7 @@ function getVariantId(record: Record<string, unknown>): number {
 }
 
 function getVariantColor(record: Record<string, unknown>): string {
-  return normalizeColor(String(record.color ?? "").trim());
+  return normalizeStoredColor(String(record.color ?? "").trim());
 }
 
 function getVariantSize(record: Record<string, unknown>): string {

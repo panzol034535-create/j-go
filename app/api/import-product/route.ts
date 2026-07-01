@@ -13,9 +13,10 @@ import {
 } from "@/lib/products/source-site";
 import { fetchZozoProduct, isZozoUrl } from "@/lib/zozo/scraper";
 import type { ZozoProductData } from "@/lib/types/product-import";
-import { isValidProductColor } from "@/lib/products/color-normalize";
+import { isValidProductColor, normalizeStoredColor } from "@/lib/products/color-normalize";
+import { parseProductColorImages } from "@/lib/products/product-fields";
+import { sanitizeColorImagesForStorage } from "@/lib/products/zozo-image-url";
 import {
-  normalizeColor,
   normalizeSize,
 } from "@/lib/products/variant-stock-normalize";
 import { normalizeProductGender, type ProductGender } from "@/lib/products/product-gender";
@@ -37,6 +38,7 @@ type ImportRequestBody = {
   sizes?: string | string[];
   gender?: string;
   variant_stock?: VariantStockEntry[];
+  color_images?: Record<string, string[]> | string;
   size_table_json?: Array<Record<string, string>> | string;
   model_height_cm?: number | null;
   model_weight_kg?: number | null;
@@ -167,6 +169,11 @@ function buildXanoProductPayload(input: {
     payload.model_wear_size = model_wear_size;
   }
 
+  const colorImages = sanitizeColorImagesForStorage(productData.color_images || {});
+  if (Object.keys(colorImages).length > 0) {
+    payload.color_images = colorImages;
+  }
+
   return payload;
 }
 
@@ -224,17 +231,32 @@ function parseImagesField(
   if (Array.isArray(images)) {
     list = images.map((item) => item.trim()).filter(Boolean);
   } else if (typeof images === "string" && images.trim()) {
-    list = images
-      .split(/[,，]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const trimmed = images.trim();
+
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        if (Array.isArray(parsed)) {
+          list = parsed.map((item) => String(item).trim()).filter(Boolean);
+        }
+      } catch {
+        // fall through to comma-separated parsing
+      }
+    }
+
+    if (list.length === 0) {
+      list = trimmed
+        .split(/[,，]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
   }
 
   if (main_image && !list.includes(main_image)) {
     list.unshift(main_image);
   }
 
-  return Array.from(new Set(list)).slice(0, 10);
+  return Array.from(new Set(list)).slice(0, 20);
 }
 
 function parseListField(
@@ -275,12 +297,12 @@ function resolveVariantStockStatus(
     return "unknown";
   }
 
-  const normalizedColor = normalizeColor(color);
+  const normalizedColor = normalizeStoredColor(color);
   const normalizedSize = normalizeSize(size);
 
   const match = normalizedVariantStock.find(
     (entry) =>
-      normalizeColor(entry.color) === normalizedColor &&
+      normalizeStoredColor(entry.color) === normalizedColor &&
       normalizeSize(entry.size) === normalizedSize
   );
 
@@ -325,6 +347,7 @@ function buildManualProductData(body: ImportRequestBody): ZozoProductData | null
   const images = parseImagesField(body.images, main_image);
   const colorsArray = parseListField(body.colors, "Default");
   const sizesArray = parseListField(body.sizes, "Free");
+  const color_images = parseProductColorImages(body.color_images);
 
   return {
     name_jp,
@@ -333,6 +356,7 @@ function buildManualProductData(body: ImportRequestBody): ZozoProductData | null
     description_jp: body.description_jp?.trim() ?? "",
     main_image: images[0] ?? main_image,
     images,
+    color_images,
     colors: colorsArray,
     sizes: sizesArray,
   };
@@ -378,12 +402,30 @@ export async function POST(request: NextRequest) {
     return serverErrorResponse("Xano API 環境變數未設定");
   }
 
+  console.log("IMPORT BODY IMAGES", body.images);
+  const parsedBodyColorImages = parseProductColorImages(body.color_images);
+  console.log("IMPORT BODY COLOR_IMAGES", body.color_images);
+  console.log(
+    "IMPORT BODY COLOR_IMAGES KEY COUNT",
+    Object.keys(parsedBodyColorImages).length
+  );
+
   let productData: ZozoProductData;
   try {
     productData = await resolveProductData(body);
   } catch (error) {
     const message = error instanceof Error ? error.message : "商品資料無效";
     return badRequestResponse(message);
+  }
+
+  console.log("IMPORT PRODUCT DATA IMAGES", productData.images);
+  console.log("IMPORT PRODUCT DATA COLOR_IMAGES", productData.color_images);
+
+  if (body.color_images) {
+    const parsedColorImages = parseProductColorImages(body.color_images);
+    if (Object.keys(parsedColorImages).length > 0) {
+      productData.color_images = parsedColorImages;
+    }
   }
 
   const price = resolvePrice(body, productData.jpy_price);
@@ -400,7 +442,7 @@ export async function POST(request: NextRequest) {
 
   const variantStockFromBody = Array.isArray(body.variant_stock)
     ? body.variant_stock.map((entry) => ({
-        color: normalizeColor(entry.color),
+        color: normalizeStoredColor(entry.color),
         size: normalizeSize(entry.size),
         stock_status:
           entry.stock_status === "in_stock" || entry.stock_status === "out_of_stock"
@@ -454,6 +496,12 @@ export async function POST(request: NextRequest) {
     });
 
     console.log("IMPORT PRODUCT PAYLOAD", productPayload);
+    console.log("IMPORT XANO IMAGES", productPayload.images);
+    console.log("IMPORT XANO COLOR_IMAGES", productPayload.color_images);
+    console.log(
+      "IMPORT XANO COLOR_IMAGES KEY COUNT",
+      Object.keys(productPayload.color_images || {}).length
+    );
     console.log("IMPORT SIZE TABLE JSON", size_table_json);
     console.log("IMPORT MODEL SIZE", {
       model_height_cm,

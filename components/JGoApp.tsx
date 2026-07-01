@@ -6,8 +6,11 @@ import { motion } from "framer-motion";
 import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles, ChevronDown, Heart, ShieldCheck, Clock, MessageCircle, Send } from "lucide-react";
 import {
   findFirstSelectableSize,
+  findImageIndexForColor,
+  getPrimaryColorImageUrl,
   getProductColorOptions,
   getProductDescription,
+  getProductImages,
   getProductSizeNames,
   getSizeOptionsForColor,
   getSizeStockQty,
@@ -16,6 +19,7 @@ import {
   parseCommaList,
   parseProductVariants,
 } from "@/lib/products/product-fields";
+import { getDisplayColorName } from "@/lib/products/color-normalize";
 import { openStockSync } from "@/lib/admin/stock-sync";
 import {
   getSizeTableColumns,
@@ -484,6 +488,9 @@ export default function JGoApp({
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [productHeroImageFailed, setProductHeroImageFailed] = useState(false);
+  const [failedProductImageUrls, setFailedProductImageUrls] = useState(() => new Set());
+  const [colorHeroOverride, setColorHeroOverride] = useState<string | null>(null);
   const mounted = useSyncExternalStore(
     subscribeClientMounted,
     getClientMountedSnapshot,
@@ -2154,7 +2161,10 @@ export default function JGoApp({
 
   const removeItem = (key) => setCart((prev) => prev.filter((item) => item.key !== key));
 
-  const productImages = selectedProduct?.images?.length ? selectedProduct.images : [selectedProduct?.image].filter(Boolean);
+  const productImages = useMemo(
+    () => getProductImages(selectedProduct),
+    [selectedProduct]
+  );
 
   const availableSizeOptions = selectedProduct
     ? getSizeOptionsForColor(selectedProduct, selectedColor)
@@ -2172,13 +2182,53 @@ export default function JGoApp({
     setSizeAIResult(null)
   }, [selectedProduct?.id]);
 
+  const productHeroFallbackImage =
+    selectedProduct?.images?.[0] || selectedProduct?.image || "";
+  const resolvedProductHeroImage =
+    colorHeroOverride ||
+    productImages[selectedImageIndex] ||
+    productImages[0] ||
+    productHeroFallbackImage;
+  const productHeroImageSrc = productHeroImageFailed
+    ? productHeroFallbackImage || resolvedProductHeroImage
+    : resolvedProductHeroImage;
+
+  useEffect(() => {
+    if (!selectedProduct || !selectedColor) {
+      return;
+    }
+
+    const index = findImageIndexForColor(selectedProduct, selectedColor);
+    if (index >= 0) {
+      setSelectedImageIndex(index);
+      setColorHeroOverride(null);
+    } else {
+      setColorHeroOverride(getPrimaryColorImageUrl(selectedProduct, selectedColor));
+    }
+
+    setProductHeroImageFailed(false);
+    setFailedProductImageUrls(new Set());
+  }, [selectedProduct, selectedColor]);
+
+  useEffect(() => {
+    setProductHeroImageFailed(false);
+  }, [selectedImageIndex, resolvedProductHeroImage, colorHeroOverride]);
+
+  const productThumbFallbackImage = productHeroFallbackImage;
+
+  const clearColorHeroOverride = () => {
+    setColorHeroOverride(null);
+  };
+
   const goToPrevImage = () => {
     if (productImages.length <= 1) return;
+    clearColorHeroOverride();
     setSelectedImageIndex((prev) => (prev - 1 + productImages.length) % productImages.length);
   };
 
   const goToNextImage = () => {
     if (productImages.length <= 1) return;
+    clearColorHeroOverride();
     setSelectedImageIndex((prev) => (prev + 1) % productImages.length);
   };
 
@@ -3424,6 +3474,7 @@ export default function JGoApp({
                           title="顏色"
                           options={colorOptions}
                           value={selection.color}
+                          formatOptionLabel={getDisplayColorName}
                           setValue={(color) => {
                             const nextSizeOptions = getProductSizeOptionsByColor(product, color);
                             const nextSize = findFirstSelectableSize(nextSizeOptions)?.name || nextSizeOptions[0]?.name || "";
@@ -3616,9 +3667,10 @@ export default function JGoApp({
                   onTouchEnd={handleImageTouchEnd}
                 >
                   <img
-                    src={productImages[selectedImageIndex] || selectedProduct.image}
+                    src={productHeroImageSrc}
                     alt={selectedProduct.name}
                     className="h-80 w-full object-contain"
+                    onError={() => setProductHeroImageFailed(true)}
                   />
                   {productImages.length > 1 && (
                     <>
@@ -3631,7 +3683,10 @@ export default function JGoApp({
                       {productImages.map((_, index) => (
                         <button
                           key={index}
-                          onClick={() => setSelectedImageIndex(index)}
+                          onClick={() => {
+                            clearColorHeroOverride();
+                            setSelectedImageIndex(index);
+                          }}
                           className={`h-2 w-2 rounded-full ${selectedImageIndex === index ? "bg-neutral-900" : "bg-neutral-300"}`}
                         />
                       ))}
@@ -3641,11 +3696,40 @@ export default function JGoApp({
 
                 {productImages.length > 1 && (
                   <div className="flex gap-2 overflow-x-auto pb-1">
-                    {productImages.map((image, index) => (
-                      <button key={image} onClick={() => setSelectedImageIndex(index)} className={`shrink-0 overflow-hidden rounded-2xl border-2 ${selectedImageIndex === index ? "border-neutral-900" : "border-transparent"}`}>
-                        <img src={image} alt={`${selectedProduct.name}-${index}`} className="h-16 w-16 object-cover" />
+                    {productImages.map((image, index) => {
+                      if (failedProductImageUrls.has(image)) {
+                        return null;
+                      }
+
+                      return (
+                      <button
+                        key={`${image}-${index}`}
+                        onClick={() => {
+                          clearColorHeroOverride();
+                          setSelectedImageIndex(index);
+                        }}
+                        className={`shrink-0 overflow-hidden rounded-2xl border-2 ${selectedImageIndex === index ? "border-neutral-900" : "border-transparent"}`}
+                      >
+                        <img
+                          src={image}
+                          alt={`${selectedProduct.name}-${index}`}
+                          className="h-16 w-16 object-contain"
+                          onError={(event) => {
+                            if (productThumbFallbackImage && event.currentTarget.src !== productThumbFallbackImage) {
+                              event.currentTarget.src = productThumbFallbackImage;
+                              return;
+                            }
+
+                            setFailedProductImageUrls((prev) => {
+                              const next = new Set(prev);
+                              next.add(image);
+                              return next;
+                            });
+                          }}
+                        />
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -3730,6 +3814,7 @@ export default function JGoApp({
                 title="顏色"
                 options={getProductColorOptions(selectedProduct)}
                 value={selectedColor}
+                formatOptionLabel={getDisplayColorName}
                 setValue={(color) => {
                   const nextSizeOptions = getSizeOptionsForColor(selectedProduct, color);
                   const firstAvailableSize = findFirstSelectableSize(nextSizeOptions)?.name || nextSizeOptions[0]?.name || "";
@@ -5314,6 +5399,7 @@ function OptionGroup({
   stockMap = {} as Record<string, number>,
   statusMap = {} as Record<string, string>,
   optionKeyPrefix = "",
+  formatOptionLabel,
 }: {
   title: string;
   options: string[];
@@ -5323,7 +5409,10 @@ function OptionGroup({
   stockMap?: Record<string, number>;
   statusMap?: Record<string, string>;
   optionKeyPrefix?: string;
+  formatOptionLabel?: (option: string) => string;
 }) {
+  const labelFor = formatOptionLabel ?? ((option: string) => option);
+
   return (
     <section>
       <h3 className="mb-3 font-bold">{title}</h3>
@@ -5349,7 +5438,7 @@ function OptionGroup({
                     : "border-neutral-200 bg-white text-neutral-700"
               }`}
             >
-              <span>{option}</span>
+              <span>{labelFor(option)}</span>
               {stockLabel ? (
                 <span className={`mt-0.5 block text-[10px] font-bold ${
                   stockLabel === "已售完"

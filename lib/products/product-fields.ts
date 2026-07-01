@@ -1,4 +1,5 @@
-import { normalizeColor } from "@/lib/products/color-normalize";
+import { normalizeColor, normalizeStoredColor } from "@/lib/products/color-normalize";
+import { filterZozoDisplayImageUrls } from "@/lib/products/zozo-image-url";
 
 export function parseCommaList(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -45,7 +46,7 @@ export function getProductColorOptions(
   }
 
   const fromVariants = (product.variants || [])
-    .map((variant) => normalizeColor(String(variant.color || "").trim()))
+    .map((variant) => normalizeStoredColor(String(variant.color || "")))
     .filter(Boolean);
 
   if (fromVariants.length > 0) {
@@ -53,7 +54,7 @@ export function getProductColorOptions(
   }
 
   const fromField = parseCommaList(product.colors)
-    .map((color) => normalizeColor(color))
+    .map((color) => normalizeStoredColor(color))
     .filter(Boolean);
 
   return Array.from(new Set(fromField));
@@ -131,7 +132,7 @@ function parseLegacyVariantString(raw: string): GroupedProductVariant[] {
     const sizeText = sizeParts.join(":");
 
     return {
-      color: normalizeColor(color?.trim() || ""),
+      color: normalizeStoredColor(color?.trim() || ""),
       sizes: sizeText
         ? sizeText.split(",").map((sizeItem) => {
             const [sizeName, stockText] = sizeItem.split(":");
@@ -159,7 +160,7 @@ function groupFlatVariants(
   const grouped = new Map<string, GroupedProductVariant>();
 
   for (const record of records) {
-    const color = normalizeColor(String(record.color || "").trim());
+    const color = normalizeStoredColor(String(record.color || "").trim());
     const name = String(record.size || record.size_name || "").trim();
     const stock = Number(record.stock ?? 0);
     const stock_status = String(record.stock_status || "unknown").trim() || "unknown";
@@ -206,7 +207,7 @@ export function parseProductVariants(product: {
     if (first.sizes && Array.isArray(first.sizes)) {
       return (raw as GroupedProductVariant[]).map((variant) => ({
         ...variant,
-        color: normalizeColor(String(variant.color || "").trim()),
+        color: normalizeStoredColor(String(variant.color || "").trim()),
         sizes: variant.sizes || [],
       }));
     }
@@ -235,9 +236,9 @@ export function getVariantForColorAndSize(
     return null;
   }
 
-  const normalizedColor = normalizeColor(color);
+  const normalizedColor = normalizeStoredColor(color);
   const variant = product.variants.find(
-    (item) => normalizeColor(item.color) === normalizedColor
+    (item) => normalizeStoredColor(item.color) === normalizedColor
   );
   if (!variant?.sizes?.length) {
     return null;
@@ -280,9 +281,9 @@ export function getSizeOptionsForColor(
     return [];
   }
 
-  const normalizedColor = normalizeColor(color);
+  const normalizedColor = normalizeStoredColor(color);
   const sizesFromVariants = (product.variants || [])
-    .filter((item) => normalizeColor(item.color) === normalizedColor)
+    .filter((item) => normalizeStoredColor(item.color) === normalizedColor)
     .flatMap((item) => item.sizes || []);
 
   if (sizesFromVariants.length > 0) {
@@ -327,4 +328,197 @@ export function findFirstSelectableSize(
     sizeOptions[0] ||
     null
   );
+}
+
+export type ProductColorImages = Record<string, string[]>;
+
+export function parseProductColorImages(value: unknown): ProductColorImages {
+  if (value === null || value === undefined) {
+    return {};
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parseProductColorImages(parsed);
+    } catch {
+      return {};
+    }
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const result: ProductColorImages = {};
+
+  for (const [rawKey, rawUrls] of Object.entries(value as Record<string, unknown>)) {
+    const colorKey = normalizeStoredColor(rawKey);
+    if (!colorKey) {
+      continue;
+    }
+
+    const urls = Array.isArray(rawUrls)
+      ? rawUrls.map((item) => String(item).trim()).filter(Boolean)
+      : typeof rawUrls === "string"
+        ? [rawUrls.trim()].filter(Boolean)
+        : [];
+
+    if (urls.length > 0) {
+      result[colorKey] = Array.from(new Set(urls));
+    }
+  }
+
+  return result;
+}
+
+function findColorImagesKey(
+  colorImages: ProductColorImages,
+  selectedColor: string
+): string | null {
+  const trimmedSelectedColor = normalizeStoredColor(selectedColor);
+  if (!trimmedSelectedColor) {
+    return null;
+  }
+
+  const keys = Object.keys(colorImages);
+  const normalizedSelectedColor = normalizeColor(trimmedSelectedColor);
+
+  if (colorImages[selectedColor]?.length) {
+    return selectedColor;
+  }
+
+  if (colorImages[trimmedSelectedColor]?.length) {
+    return trimmedSelectedColor;
+  }
+
+  if (normalizedSelectedColor && colorImages[normalizedSelectedColor]?.length) {
+    return normalizedSelectedColor;
+  }
+
+  for (const key of keys) {
+    if (key === selectedColor || key === trimmedSelectedColor) {
+      if (colorImages[key]?.length) {
+        return key;
+      }
+    }
+
+    if (normalizeColor(key) === normalizedSelectedColor && colorImages[key]?.length) {
+      return key;
+    }
+  }
+
+  return null;
+}
+
+function normalizeImageUrlForMatch(url: string): string {
+  return url.trim().split("?")[0];
+}
+
+export function getProductImages(
+  product: {
+    images?: string[];
+    image?: string;
+  } | null | undefined
+): string[] {
+  if (!product) {
+    return [];
+  }
+
+  if (product.images?.length) {
+    return product.images;
+  }
+
+  return product.image ? [String(product.image)] : [];
+}
+
+export function getPrimaryColorImageUrl(
+  product: {
+    color_images?: ProductColorImages;
+  } | null | undefined,
+  selectedColor: string
+): string | null {
+  if (!product) {
+    return null;
+  }
+
+  const matchedKey = findColorImagesKey(product.color_images || {}, selectedColor);
+  if (!matchedKey) {
+    return null;
+  }
+
+  const urls = filterZozoDisplayImageUrls(product.color_images?.[matchedKey] || []);
+  return urls[0] || null;
+}
+
+export function findImageIndexForColor(
+  product: {
+    images?: string[];
+    image?: string;
+    color_images?: ProductColorImages;
+  } | null | undefined,
+  selectedColor: string
+): number {
+  const productImages = getProductImages(product);
+  const colorUrl = getPrimaryColorImageUrl(product, selectedColor);
+
+  if (!colorUrl || productImages.length === 0) {
+    return -1;
+  }
+
+  const exactIndex = productImages.findIndex((entry) => entry === colorUrl);
+  if (exactIndex >= 0) {
+    return exactIndex;
+  }
+
+  const normalizedColorUrl = normalizeImageUrlForMatch(colorUrl);
+  return productImages.findIndex(
+    (entry) => normalizeImageUrlForMatch(entry) === normalizedColorUrl
+  );
+}
+
+export function getProductImagesForColor(
+  product: {
+    images?: string[];
+    image?: string;
+    color_images?: ProductColorImages;
+  } | null | undefined,
+  color: string
+): string[] {
+  if (!product) {
+    return [];
+  }
+
+  const colorImages = product.color_images || {};
+  const fallbackImages = product.images?.length
+    ? product.images
+    : product.image
+      ? [String(product.image)]
+      : [];
+
+  const resolveDisplay = (urls: string[] | undefined): string[] => {
+    const filtered = filterZozoDisplayImageUrls(urls || []);
+    return filtered.length > 0 ? filtered : fallbackImages;
+  };
+
+  const selectedColor = color;
+  const normalizedSelectedColor = normalizeColor(normalizeStoredColor(selectedColor));
+  const matchedKey = findColorImagesKey(colorImages, selectedColor);
+
+  console.log("COLOR IMAGE LOOKUP", {
+    selectedColor,
+    normalizedSelectedColor,
+    colorImageKeys: Object.keys(colorImages),
+    matchedKey,
+  });
+
+  if (matchedKey && colorImages[matchedKey]?.length) {
+    return resolveDisplay(colorImages[matchedKey]);
+  }
+
+  if (fallbackImages.length) {
+    return fallbackImages;
+  }
+
+  return [];
 }

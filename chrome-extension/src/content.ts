@@ -176,6 +176,8 @@ async function handleImportClick(button: HTMLButtonElement) {
     };
 
     console.log("SCRAPED PRODUCT", payload);
+    console.log("IMPORT PAYLOAD IMAGES LENGTH", payload.images.length);
+    console.log("IMPORT PAYLOAD COLOR_IMAGES", payload.color_images);
     console.log("FINAL COLORS", payload.colors.split(",").filter(Boolean));
     console.log("FINAL SIZES", payload.sizes.split(",").filter(Boolean));
     console.log("FINAL IMAGES", payload.images);

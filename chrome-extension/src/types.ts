@@ -32,6 +32,7 @@ export type ImportProductPayload = {
   model_height_cm?: number | null;
   model_weight_kg?: number | null;
   model_wear_size?: string;
+  color_images?: Record<string, string[]>;
   source_url: string;
   source_site: string;
 };

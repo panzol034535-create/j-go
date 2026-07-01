@@ -1,14 +1,17 @@
 export const COLOR_MAP: Record<string, string> = {
-  ブラック系その他: "黑色系其他",
+  ブラック系その他: "黑色",
   ブラック系1: "黑色",
   ブラック系2: "黑色",
   ブラック: "黑色",
   ホワイト: "白色",
+  ホワイト系その他: "白色",
   オフホワイト: "米白色",
   アイボリー: "象牙白",
   エクリュ: "本白色",
   グレー系: "灰色",
   グレー: "灰色",
+  グレー系その他: "灰色",
+  杢グレー: "麻灰色",
   アッシュグレー: "灰色",
   チャコールアッシュ: "炭灰色",
   ライトグレー: "淺灰色",
@@ -26,6 +29,7 @@ export const COLOR_MAP: Record<string, string> = {
   オリーブ: "橄欖綠",
   ダークネイビー: "深藍色",
   ネイビー: "深藍色",
+  ネイビー系: "深藍色",
   ブルー系その他: "藍色",
   ブルー系: "藍色",
   ブルー系1: "藍色",
@@ -33,6 +37,9 @@ export const COLOR_MAP: Record<string, string> = {
   ブルー系3: "藍色",
   ブルー系5: "藍色",
   ブルー: "藍色",
+  インディゴブルー: "丹寧藍",
+  ライトインディゴブルー: "淺丹寧藍",
+  ダークインディゴブルー: "深丹寧藍",
   ライトブルー: "淺藍色",
   サックスブルー: "薩克斯藍",
   ブルーグリーン: "藍綠色",
@@ -105,8 +112,130 @@ export const ZOZO_COLOR_KEYWORDS = [
 
 const COLOR_MAP_KEYS_BY_LENGTH = Object.keys(COLOR_MAP).sort((a, b) => b.length - a.length);
 
+const ZOZO_KEI_SONOTA_BASE: Record<string, string> = {
+  ブラック: "黑色",
+  ホワイト: "白色",
+  ブルー: "藍色",
+  グレー: "灰色",
+  ネイビー: "深藍色",
+};
+
 function collapseWhitespace(color: string): string {
   return color.replace(/\s+/g, " ").trim();
+}
+
+/** Trim-only color key for storage / variant matching (preserves ZOZO source names). */
+export function normalizeStoredColor(color: string): string {
+  return collapseWhitespace(color);
+}
+
+function resolveZozoColorStemLabel(colorStem: string): string | null {
+  return (
+    ZOZO_KEI_SONOTA_BASE[colorStem] ||
+    COLOR_MAP[`${colorStem}系`] ||
+    COLOR_MAP[colorStem] ||
+    null
+  );
+}
+
+/** ブルー系その他2 → 藍色 款式2；ブルー系その他 → 藍色 其他 */
+function formatZozoKeiSonotaDisplayName(raw: string): string | null {
+  const match = raw.match(/^(.+?)系その他(\d*)$/);
+  if (!match) {
+    return null;
+  }
+
+  const baseLabel = resolveZozoColorStemLabel(match[1]);
+  if (!baseLabel) {
+    return null;
+  }
+
+  const suffixDigit = match[2]?.trim();
+  if (suffixDigit) {
+    return `${baseLabel} 款式${suffixDigit}`;
+  }
+
+  return `${baseLabel} 其他`;
+}
+
+/** ネイビー系1 → 深藍色 款式1 */
+function formatZozoKeiNumberDisplayName(raw: string): string | null {
+  const match = raw.match(/^(.+?)系(\d+)$/);
+  if (!match || raw.includes("その他")) {
+    return null;
+  }
+
+  const baseLabel = resolveZozoColorStemLabel(match[1]);
+  if (!baseLabel) {
+    return null;
+  }
+
+  return `${baseLabel} 款式${match[2]}`;
+}
+
+function formatLegacyChineseSonotaDisplayName(
+  raw: string,
+  pattern: RegExp,
+  baseLabel: string
+): string | null {
+  const match = raw.match(pattern);
+  if (!match) {
+    return null;
+  }
+
+  const suffixDigit = match[1]?.trim();
+  if (suffixDigit) {
+    return `${baseLabel} 款式${suffixDigit}`;
+  }
+
+  return `${baseLabel} 其他`;
+}
+
+/** Friendly storefront label; order_items / variants keep the stored source color. */
+export function getDisplayColorName(color: string): string {
+  const raw = collapseWhitespace(color);
+  if (!raw) {
+    return raw;
+  }
+
+  const sonotaDisplay = formatZozoKeiSonotaDisplayName(raw);
+  if (sonotaDisplay) {
+    return sonotaDisplay;
+  }
+
+  const keiNumberDisplay = formatZozoKeiNumberDisplayName(raw);
+  if (keiNumberDisplay) {
+    return keiNumberDisplay;
+  }
+
+  if (COLOR_MAP[raw]) {
+    return COLOR_MAP[raw];
+  }
+
+  const legacyBlack = formatLegacyChineseSonotaDisplayName(
+    raw,
+    /^黑色系其他(\d*)$/,
+    "黑色"
+  );
+  if (legacyBlack) {
+    return legacyBlack;
+  }
+
+  const legacyWhite = formatLegacyChineseSonotaDisplayName(
+    raw,
+    /^白色系其他(\d*)$/,
+    "白色"
+  );
+  if (legacyWhite) {
+    return legacyWhite;
+  }
+
+  const passthroughColors = ["綠色", "藍色", "黃色", "粉色"];
+  if (passthroughColors.includes(raw)) {
+    return raw;
+  }
+
+  return translateSingleColor(raw);
 }
 
 function containsJapanese(text: string): boolean {
@@ -217,6 +346,23 @@ function translateSingleColor(color: string): string {
   const normalized = collapseWhitespace(color);
   if (COLOR_MAP[normalized]) {
     return COLOR_MAP[normalized];
+  }
+
+  const sonotaMatch = normalized.match(/^(.+?)系その他(\d*)$/);
+  if (sonotaMatch) {
+    const baseLabel = resolveZozoColorStemLabel(sonotaMatch[1]);
+    if (baseLabel) {
+      const suffixDigit = sonotaMatch[2]?.trim();
+      return suffixDigit ? `${baseLabel}款式${suffixDigit}` : `${baseLabel}其他`;
+    }
+  }
+
+  const keiNumberMatch = normalized.match(/^(.+?)系(\d+)$/);
+  if (keiNumberMatch && !normalized.includes("その他")) {
+    const baseLabel = resolveZozoColorStemLabel(keiNumberMatch[1]);
+    if (baseLabel) {
+      return `${baseLabel}款式${keiNumberMatch[2]}`;
+    }
   }
 
   if (normalized.endsWith("その他")) {

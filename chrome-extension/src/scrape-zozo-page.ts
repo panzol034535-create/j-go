@@ -1,5 +1,14 @@
+export { acceptZozoDisplayImageUrl } from "../../lib/products/zozo-image-url";
+
 import type { ScrapeResult, VariantStock } from "./types";
-import { isValidZozoColorName, normalizeColor } from "../../lib/products/color-normalize";
+import { isValidZozoColorName, normalizeStoredColor } from "../../lib/products/color-normalize";
+import {
+  acceptZozoDisplayImageUrl,
+  filterZozoDisplayImageUrls,
+  findMatchingDisplayUrls,
+  isZozoThumbnailImageUrl,
+  sanitizeColorImagesForStorage,
+} from "../../lib/products/zozo-image-url";
 import {
   countSizeTableHeaderKeywords,
   isSizeTableSizeToken,
@@ -1112,7 +1121,7 @@ function findColorOptionElements(): ColorOption[] {
       return;
     }
 
-    const key = normalizeColor(candidate);
+    const key = normalizeStoredColor(candidate);
     if (seen.has(key)) {
       return;
     }
@@ -1140,7 +1149,7 @@ function findColorOptionElements(): ColorOption[] {
 }
 
 function colorsMatch(left: string, right: string): boolean {
-  return normalizeColor(left) === normalizeColor(right);
+  return normalizeStoredColor(left) === normalizeStoredColor(right);
 }
 
 async function clickColorOption(option: ColorOption): Promise<boolean> {
@@ -1195,7 +1204,7 @@ async function extractVariantStockByClickingColors(
   const result: VariantStock[] = [];
 
   for (const option of colorOptions) {
-    const color = normalizeColor(option.rawColor);
+    const color = normalizeStoredColor(option.rawColor);
     console.log("CLICK COLOR", option.rawColor, color);
 
     const clickOk = await clickColorOption(option);
@@ -1283,11 +1292,13 @@ function shouldExcludeImage(url: string, alt: string, width: number, height: num
     return true;
   }
 
-  if (width > 0 && width < MIN_IMAGE_DIMENSION) {
+  const relaxMinSize = isLikelyZozoProductImage(url);
+
+  if (!relaxMinSize && width > 0 && width < MIN_IMAGE_DIMENSION) {
     return true;
   }
 
-  if (height > 0 && height < MIN_IMAGE_DIMENSION) {
+  if (!relaxMinSize && height > 0 && height < MIN_IMAGE_DIMENSION) {
     return true;
   }
 
@@ -1382,6 +1393,565 @@ function extractPrice(jsonLd: Record<string, unknown> | null): number {
   return 0;
 }
 
+function isLikelyZozoProductImage(url: string): boolean {
+  if (!isZozoImageHost(url)) {
+    return false;
+  }
+
+  return (
+    isPreferredProductImageUrl(url) ||
+    /\/goods\/|\/item\/|product|_c_|_d_|_m_/i.test(url)
+  );
+}
+
+/** ZOZO CDN product/thumbnail URLs (includes gallery `_b_` thumbs). */
+function isZozoGoodsCdnImage(url: string): boolean {
+  if (!isZozoImageHost(url) || containsExcludedImageKeyword(url)) {
+    return false;
+  }
+
+  return (
+    /\d+[a-z]?_[bmd]_\d+_\d+/i.test(url) ||
+    isLikelyZozoProductImage(url)
+  );
+}
+
+function pickThumbUrlForMatching(urls: string[]): string | null {
+  const candidates = urls
+    .map((entry) => normalizeImageUrl(entry))
+    .filter((entry): entry is string => Boolean(entry));
+
+  return (
+    candidates.find((entry) => isZozoThumbnailImageUrl(entry)) ||
+    candidates.find((entry) => isZozoGoodsCdnImage(entry)) ||
+    null
+  );
+}
+
+function resolveColorDisplayUrlsForThumb(
+  thumbUrls: string[],
+  carouselPool: string[],
+  itemIndex: number
+): string[] {
+  const thumbUrl = pickThumbUrlForMatching(thumbUrls);
+  console.log("COLOR THUMB URL", thumbUrl || null);
+
+  if (!thumbUrl) {
+    console.log("SKIP INVALID COLOR IMAGE", "missing thumb url");
+    return [];
+  }
+
+  const variantMatches = findMatchingDisplayUrls(thumbUrl, carouselPool);
+  if (variantMatches.length > 0) {
+    console.log("MATCHED REAL GALLERY URL", variantMatches[0]);
+    return variantMatches;
+  }
+
+  const indexMatch = carouselPool[itemIndex];
+  if (indexMatch && acceptZozoDisplayImageUrl(indexMatch)) {
+    console.log("MATCHED REAL GALLERY URL", indexMatch);
+    return [indexMatch];
+  }
+
+  console.log("SKIP INVALID COLOR IMAGE", thumbUrl);
+  return [];
+}
+
+function collectRealGalleryDisplayUrls(...roots: (Element | null | undefined)[]): string[] {
+  const urls: string[] = [];
+  const seenRoots = new Set<Element>();
+
+  for (const root of roots) {
+    if (!root || seenRoots.has(root)) {
+      continue;
+    }
+
+    seenRoots.add(root);
+
+    root.querySelectorAll("img, source[srcset], source[src]").forEach((element) => {
+      if (isInsideExcludedRecommendationBlock(element)) {
+        return;
+      }
+
+      urls.push(...collectImageUrlsFromElement(element));
+    });
+  }
+
+  return filterZozoDisplayImageUrls(
+    urls
+      .map((entry) => normalizeImageUrl(entry))
+      .filter((entry): entry is string => Boolean(entry))
+  );
+}
+
+function findMainProductImageCarousel(): Element | null {
+  const main = document.querySelector("main") ?? document.body;
+  const selectors = [
+    '[data-testid*="main-image" i]',
+    '[class*="MainImage" i]',
+    '[class*="main-image" i]',
+    '[class*="PrimaryImage" i]',
+    '[class*="ProductImageCarousel" i]',
+    '[class*="SlideImage" i]',
+    '[class*="Carousel" i][class*="Image" i]',
+  ];
+
+  for (const selector of selectors) {
+    const match = main.querySelector(selector);
+    if (match instanceof Element && !isInsideExcludedRecommendationBlock(match)) {
+      return match.closest("section, div, figure") || match;
+    }
+  }
+
+  return null;
+}
+
+function parseSrcsetUrls(srcset: string): string[] {
+  const urls: string[] = [];
+
+  for (const part of srcset.split(",")) {
+    const candidate = part.trim().split(/\s+/)[0] || "";
+    const url = normalizeImageUrl(candidate);
+    if (url) {
+      urls.push(url);
+    }
+  }
+
+  return urls;
+}
+
+function collectImageUrlsFromElement(element: Element): string[] {
+  const urls: string[] = [];
+
+  if (element instanceof HTMLImageElement) {
+    const candidates = [
+      element.src,
+      element.currentSrc,
+      element.getAttribute("data-src"),
+      element.getAttribute("data-original"),
+    ];
+
+    for (const raw of candidates) {
+      const url = normalizeImageUrl(raw || "");
+      if (url) {
+        urls.push(url);
+      }
+    }
+
+    const srcset = element.getAttribute("srcset");
+    if (srcset) {
+      urls.push(...parseSrcsetUrls(srcset));
+    }
+  }
+
+  if (element instanceof HTMLSourceElement) {
+    const srcset = element.getAttribute("srcset");
+    if (srcset) {
+      urls.push(...parseSrcsetUrls(srcset));
+    }
+
+    const src = normalizeImageUrl(element.getAttribute("src") || "");
+    if (src) {
+      urls.push(src);
+    }
+  }
+
+  return urls;
+}
+
+type ColorImagesMap = Record<string, string[]>;
+
+const EXCLUDED_GALLERY_KEYWORDS = [
+  "おすすめ",
+  "似たアイテム",
+  "このアイテムを見た人",
+  "関連商品",
+  "コーディネート",
+  "レコメンド",
+  "styling",
+  "coordinate",
+  "recommend",
+  "similar",
+  "あわせ買い",
+] as const;
+
+function isInsideExcludedRecommendationBlock(element: Element): boolean {
+  let node: Element | null = element;
+
+  while (node) {
+    const className = node.className?.toString().toLowerCase() || "";
+    const id = node.id?.toLowerCase() || "";
+    const testId = node.getAttribute("data-testid")?.toLowerCase() || "";
+    const marker = `${className} ${id} ${testId}`;
+
+    if (
+      EXCLUDED_GALLERY_KEYWORDS.some((keyword) =>
+        marker.includes(keyword.toLowerCase())
+      )
+    ) {
+      return true;
+    }
+
+    node = node.parentElement;
+  }
+
+  return false;
+}
+
+function countGalleryCdnImages(root: Element): number {
+  let count = 0;
+
+  root.querySelectorAll("img").forEach((img) => {
+    for (const url of collectImageUrlsFromElement(img)) {
+      if (isZozoGoodsCdnImage(url)) {
+        count += 1;
+        break;
+      }
+    }
+  });
+
+  return count;
+}
+
+function findProductImageGallery(): Element | null {
+  const main = document.querySelector("main") ?? document.body;
+  const selectors = [
+    '[data-testid*="product-image" i]',
+    '[data-testid*="ProductImage" i]',
+    '[class*="SubImage" i]',
+    '[class*="subImage" i]',
+    '[class*="sub-image" i]',
+    '[class*="Thumbnail" i]',
+    '[class*="thumbnail" i]',
+    '[class*="ProductImage" i]',
+    '[class*="product-image" i]',
+    '[class*="ItemPhoto" i]',
+    '[class*="GoodsImage" i]',
+    '[class*="goods-image" i]',
+    '[id*="goods-image" i]',
+    '[class*="image-gallery" i]',
+    '[class*="ImageGallery" i]',
+  ];
+
+  for (const selector of selectors) {
+    const matches = main.querySelectorAll(selector);
+    for (const element of matches) {
+      if (!(element instanceof Element) || isInsideExcludedRecommendationBlock(element)) {
+        continue;
+      }
+
+      const container = element.closest("section, ul, ol, nav, div, figure") || element;
+      if (countGalleryCdnImages(container) >= 1) {
+        return container;
+      }
+    }
+  }
+
+  let best: { element: Element; score: number } | null = null;
+  const candidates = main.querySelectorAll("section, div, ul, ol, nav");
+
+  candidates.forEach((candidate) => {
+    if (isInsideExcludedRecommendationBlock(candidate)) {
+      return;
+    }
+
+    const productImgCount = countGalleryCdnImages(candidate);
+    if (productImgCount < 1) {
+      return;
+    }
+
+    if (!best || productImgCount > best.score) {
+      best = { element: candidate, score: productImgCount };
+    }
+  });
+
+  return best?.element ?? null;
+}
+
+function pickBestImageUrl(urls: string[]): string | null {
+  const unique = Array.from(new Set(urls.filter(isLikelyZozoProductImage)));
+  if (unique.length === 0) {
+    return null;
+  }
+
+  unique.sort(compareImagePriority);
+  return unique[0] ?? null;
+}
+
+function isGalleryColorLabel(text: string): boolean {
+  const trimmed = stripText(text);
+  if (!trimmed || trimmed.length > 40) {
+    return false;
+  }
+
+  if (isExcludedKeyword(trimmed, EXCLUDED_COLOR_KEYWORDS)) {
+    return false;
+  }
+
+  if (/^(select|choose|size|color|default)$/i.test(trimmed)) {
+    return false;
+  }
+
+  return isValidZozoColorName(trimmed);
+}
+
+function extractColorLabelFromGalleryItem(item: Element): string | null {
+  const candidates: string[] = [];
+
+  const pushCandidate = (value: string) => {
+    const trimmed = stripText(value);
+    if (trimmed && isGalleryColorLabel(trimmed)) {
+      candidates.push(trimmed);
+    }
+  };
+
+  const img = item.querySelector("img");
+  if (img) {
+    pushCandidate(img.getAttribute("alt") || "");
+  }
+
+  pushCandidate(item.getAttribute("aria-label") || "");
+
+  const labelSelectors = [
+    '[class*="color-name" i]',
+    '[class*="ColorName" i]',
+    '[class*="caption" i]',
+    '[class*="Caption" i]',
+    '[class*="thumb" i] + *',
+    "figcaption",
+    "span",
+    "p",
+    "small",
+  ];
+
+  for (const selector of labelSelectors) {
+    for (const element of item.querySelectorAll(selector)) {
+      if (element.querySelector("img")) {
+        continue;
+      }
+
+      pushCandidate(element.textContent || "");
+    }
+  }
+
+  for (const child of item.children) {
+    if (child.querySelector("img")) {
+      continue;
+    }
+
+    pushCandidate(child.textContent || "");
+  }
+
+  const childTexts = Array.from(item.childNodes)
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => stripText(node.textContent || ""))
+    .filter(Boolean);
+
+  for (const text of childTexts) {
+    pushCandidate(text);
+  }
+
+  let sibling = item.nextElementSibling;
+  for (let index = 0; index < 3 && sibling; index += 1) {
+    if (!sibling.querySelector("img")) {
+      pushCandidate(sibling.textContent || "");
+    }
+
+    sibling = sibling.nextElementSibling;
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort((a, b) => a.length - b.length);
+  return normalizeStoredColor(candidates[0]);
+}
+
+function collectGalleryItemCandidates(galleryRoot: Element): Element[] {
+  const itemSelectors = [
+    "li",
+    "button",
+    '[role="button"]',
+    "figure",
+    '[class*="thumbnail" i]',
+    '[class*="Thumb" i]',
+    '[class*="slide" i]',
+  ];
+
+  const seen = new Set<Element>();
+  const items: Element[] = [];
+
+  for (const selector of itemSelectors) {
+    galleryRoot.querySelectorAll(selector).forEach((element) => {
+      if (!(element instanceof Element) || seen.has(element)) {
+        return;
+      }
+
+      if (!element.querySelector("img")) {
+        return;
+      }
+
+      seen.add(element);
+      items.push(element);
+    });
+  }
+
+  if (items.length === 0) {
+    galleryRoot.querySelectorAll("img").forEach((img) => {
+      const item = img.closest("li, button, figure, div") || img.parentElement;
+      if (item && !seen.has(item)) {
+        seen.add(item);
+        items.push(item);
+      }
+    });
+  }
+
+  return items;
+}
+
+function appendColorImage(
+  colorImages: ColorImagesMap,
+  color: string,
+  url: string
+): void {
+  if (!colorImages[color]) {
+    colorImages[color] = [];
+  }
+
+  if (!colorImages[color].includes(url)) {
+    colorImages[color].push(url);
+  }
+}
+
+function collectGalleryImagesFromItem(
+  item: Element,
+  color_images: ColorImagesMap,
+  unlabeledImages: string[],
+  carouselPool: string[],
+  itemIndex: number
+): void {
+  const thumbUrls: string[] = [];
+  item.querySelectorAll("img, source[srcset], source[src]").forEach((element) => {
+    thumbUrls.push(...collectImageUrlsFromElement(element));
+  });
+
+  const displayUrls = resolveColorDisplayUrlsForThumb(thumbUrls, carouselPool, itemIndex);
+  const colorLabel = extractColorLabelFromGalleryItem(item);
+
+  if (colorLabel) {
+    if (displayUrls.length === 0) {
+      return;
+    }
+
+    for (const url of displayUrls) {
+      if (!shouldExcludeImage(url, "", 0, 0)) {
+        appendColorImage(color_images, colorLabel, url);
+      }
+    }
+    return;
+  }
+
+  const firstDisplayUrl = displayUrls.find((url) => !shouldExcludeImage(url, "", 0, 0));
+  if (firstDisplayUrl) {
+    unlabeledImages.push(firstDisplayUrl);
+  }
+}
+
+function extractProductGalleryData(): {
+  images: string[];
+  color_images: ColorImagesMap;
+} {
+  const galleryRoot = findProductImageGallery();
+  const carouselRoot = findMainProductImageCarousel();
+  const imageSection =
+    galleryRoot?.closest("section, article, div") ||
+    carouselRoot?.closest("section, article, div") ||
+    null;
+  const carouselPool = collectRealGalleryDisplayUrls(
+    carouselRoot,
+    galleryRoot,
+    imageSection,
+    galleryRoot?.parentElement
+  );
+  const color_images: ColorImagesMap = {};
+  const unlabeledImages: string[] = [];
+
+  console.log("ZOZO GALLERY ROOT", galleryRoot ? galleryRoot.className : null);
+  console.log("ZOZO CAROUSEL POOL COUNT", carouselPool.length);
+
+  if (!galleryRoot) {
+    const ogImage = normalizeImageUrl(getMetaContent("og:image"));
+    const displayOg = ogImage ? acceptZozoDisplayImageUrl(ogImage) : null;
+    if (displayOg && !shouldExcludeImage(displayOg, "", 0, 0)) {
+      unlabeledImages.push(displayOg);
+    } else if (carouselPool[0]) {
+      unlabeledImages.push(carouselPool[0]);
+    }
+
+    return { images: unlabeledImages, color_images };
+  }
+
+  const items = collectGalleryItemCandidates(galleryRoot);
+  console.log("ZOZO GALLERY ITEM COUNT", items.length);
+
+  items.forEach((item, itemIndex) => {
+    collectGalleryImagesFromItem(item, color_images, unlabeledImages, carouselPool, itemIndex);
+  });
+
+  if (Object.keys(color_images).length === 0) {
+    galleryRoot.querySelectorAll("li, [role='listitem']").forEach((item, itemIndex) => {
+      if (isInsideExcludedRecommendationBlock(item)) {
+        return;
+      }
+
+      collectGalleryImagesFromItem(item, color_images, unlabeledImages, carouselPool, itemIndex);
+    });
+  }
+
+  if (Object.keys(color_images).length === 0) {
+    galleryRoot.querySelectorAll("img").forEach((img, itemIndex) => {
+      const alt = stripText(img.getAttribute("alt") || "");
+      const thumbUrls = collectImageUrlsFromElement(img);
+      const displayUrls = resolveColorDisplayUrlsForThumb(thumbUrls, carouselPool, itemIndex);
+      const container = img.closest("li, button, figure, div") || img.parentElement;
+      const colorLabel =
+        (alt && isGalleryColorLabel(alt) ? normalizeStoredColor(alt) : null) ||
+        (container ? extractColorLabelFromGalleryItem(container) : null);
+
+      if (!colorLabel || displayUrls.length === 0) {
+        return;
+      }
+
+      for (const url of displayUrls) {
+        if (!shouldExcludeImage(url, alt, 0, 0)) {
+          appendColorImage(color_images, colorLabel, url);
+        }
+      }
+    });
+  }
+
+  const sanitizedColorImages = sanitizeColorImagesForStorage(color_images);
+  const imagesFromColors = Object.values(sanitizedColorImages).flat();
+  const merged = Array.from(
+    new Set([
+      ...carouselPool,
+      ...imagesFromColors,
+      ...filterZozoDisplayImageUrls(unlabeledImages),
+    ])
+  )
+    .filter((url) => !shouldExcludeImage(url, "", 0, 0))
+    .sort(compareImagePriority)
+    .slice(0, MAX_IMAGES);
+
+  console.log("FINAL COLOR_IMAGES", sanitizedColorImages);
+  console.log("ZOZO COLOR_IMAGES", sanitizedColorImages);
+  console.log("IMPORT COLOR_IMAGES", sanitizedColorImages);
+  console.log("IMPORT PAYLOAD IMAGES LENGTH", merged.length);
+
+  return { images: merged, color_images: sanitizedColorImages };
+}
+
 function extractDescription(jsonLd: Record<string, unknown> | null): string {
   if (typeof jsonLd?.description === "string" && jsonLd.description.trim()) {
     return stripText(jsonLd.description);
@@ -1403,53 +1973,7 @@ function extractDescription(jsonLd: Record<string, unknown> | null): string {
 }
 
 function extractImages(): string[] {
-  const imageMeta = new Map<string, { alt: string; width: number; height: number }>();
-
-  document.querySelectorAll("img").forEach((element) => {
-    const alt = element.getAttribute("alt")?.trim() || "";
-    const { width, height } = getElementDimensions(element);
-    const candidates = [
-      element instanceof HTMLImageElement ? element.src : element.getAttribute("src"),
-      element instanceof HTMLImageElement ? element.currentSrc : null,
-      element.getAttribute("data-src"),
-      element.getAttribute("data-original"),
-    ];
-
-    for (const raw of candidates) {
-      const url = normalizeImageUrl(raw || "");
-      if (!url) {
-        continue;
-      }
-
-      const existing = imageMeta.get(url);
-      if (!existing) {
-        imageMeta.set(url, { alt, width, height });
-        continue;
-      }
-
-      imageMeta.set(url, {
-        alt: existing.alt || alt,
-        width: Math.max(existing.width, width),
-        height: Math.max(existing.height, height),
-      });
-    }
-  });
-
-  const filtered = Array.from(imageMeta.entries())
-    .filter(([url, meta]) => !shouldExcludeImage(url, meta.alt, meta.width, meta.height))
-    .map(([url]) => url)
-    .sort(compareImagePriority);
-
-  if (filtered.length === 0) {
-    const ogImage = normalizeImageUrl(getMetaContent("og:image"));
-    if (ogImage && !shouldExcludeImage(ogImage, "", 0, 0)) {
-      filtered.push(ogImage);
-    }
-  }
-
-  const result = filtered.slice(0, MAX_IMAGES);
-  console.log("FILTERED IMAGES", result);
-  return result;
+  return extractProductGalleryData().images;
 }
 
 export function isZozoProductPage(): boolean {
@@ -1510,7 +2034,7 @@ function parseColorStockFromText(text: string): VariantStock[] {
         }
 
         results.push({
-          color: normalizeColor(currentColor),
+          color: normalizeStoredColor(currentColor),
           size: normalizeSize(match[1] || ""),
           stock_status: stockStatus,
         });
@@ -1620,7 +2144,7 @@ function buildUnknownVariantStock(colors: string[], sizes: string[]): VariantSto
   for (const color of colors) {
     for (const size of sizes) {
       results.push({
-        color: normalizeColor(color),
+        color: normalizeStoredColor(color),
         size: normalizeSize(size),
         stock_status: "unknown",
       });
@@ -1973,7 +2497,8 @@ export async function scrapeZozoProductPage(): Promise<ScrapeResult> {
   const brand = extractBrand(jsonLd);
   const jpy_price = extractPrice(jsonLd);
   const description_jp = extractDescription(jsonLd);
-  const images = extractImages();
+  const { images, color_images } = extractProductGalleryData();
+  console.log("ZOZO COLOR_IMAGES", color_images);
   const main_image = images[0] || "";
 
   if (!name_jp) {
@@ -1995,7 +2520,9 @@ export async function scrapeZozoProductPage(): Promise<ScrapeResult> {
     sizes = uniqueSizesFromVariantStock(variant_stock);
   } else {
     const legacy = extractColorsAndSizes();
-    colors = legacy.colors.map(normalizeColor).filter((color) => isValidZozoColorName(color));
+    colors = legacy.colors
+      .map((color) => normalizeStoredColor(color))
+      .filter((color) => isValidZozoColorName(color));
     sizes = legacy.sizes;
     if (colors.length === 0) {
       colors = ["Default"];
@@ -2018,6 +2545,7 @@ export async function scrapeZozoProductPage(): Promise<ScrapeResult> {
     description_jp,
     main_image,
     images,
+    color_images,
     colors: colors.join(","),
     sizes: sizes.join(","),
     variant_stock,

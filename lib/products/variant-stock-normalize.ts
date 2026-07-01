@@ -4,9 +4,9 @@ export type VariantStockEntry = {
   stock_status: string;
 };
 
-import { isValidProductColor, normalizeColor } from "@/lib/products/color-normalize";
+import { isValidProductColor, normalizeColor, normalizeStoredColor } from "@/lib/products/color-normalize";
 
-export { normalizeColor, isValidProductColor };
+export { normalizeColor, isValidProductColor, normalizeStoredColor };
 
 export function normalizeSize(size: string): string {
   const normalized = size.trim().toUpperCase();
@@ -49,7 +49,7 @@ export function normalizeVariantStockEntries(
 
   return entries
     .map((entry) => ({
-      color: normalizeColor(String(entry.color || "")),
+      color: normalizeStoredColor(String(entry.color || "")),
       size: normalizeSize(String(entry.size || "")),
       stock_status: normalizeStockStatus(entry.stock_status),
     }))
@@ -61,12 +61,12 @@ export function matchVariantStockStatus(
   color: string,
   size: string
 ): "in_stock" | "out_of_stock" | "unknown" | null {
-  const normalizedColor = normalizeColor(color);
+  const normalizedColor = normalizeStoredColor(color);
   const normalizedSize = normalizeSize(size);
 
   const match = normalizedVariantStock.find(
     (entry) =>
-      normalizeColor(entry.color) === normalizedColor &&
+      normalizeStoredColor(entry.color) === normalizedColor &&
       normalizeSize(entry.size) === normalizedSize
   );
 
