@@ -45,6 +45,10 @@ import {
 import { runPrelaunchChecks, summarizePrelaunchChecks } from "@/lib/prelaunch-check";
 import { resolveProductCatalog, findProductById, productIdsMatch } from "@/lib/products/product-catalog";
 import {
+  AI_SUPPORT_RATE_LIMIT_MESSAGE,
+  sanitizeAiSupportClientError,
+} from "@/lib/openai/ai-support-error";
+import {
   bumpFavoriteLookbookRankings,
   bumpFavoriteProductRankings,
   bumpLookbookFavoriteCount,
@@ -568,7 +572,25 @@ export default function JGoApp({
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
   const [couponError, setCouponError] = useState("");
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
-  const [supportMessages, setSupportMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([]);
+  const [supportMessages, setSupportMessages] = useState<
+    Array<{
+      role: "user" | "assistant";
+      text: string;
+      products?: Array<{
+        id: number;
+        name: string;
+        brand: string;
+        price: number;
+        image: string;
+      }>;
+      lookbooks?: Array<{
+        id: number;
+        title: string;
+        image: string;
+        tag: string;
+      }>;
+    }>
+  >([]);
   const [supportInput, setSupportInput] = useState("");
   const [isSupportSending, setIsSupportSending] = useState(false);
   const [supportError, setSupportError] = useState("");
@@ -1829,31 +1851,89 @@ export default function JGoApp({
     setSupportMessages((previous) => [...previous, { role: "user", text: message }]);
     setIsSupportSending(true);
 
+    const lastRecommendation = [...supportMessages]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.role === "assistant" &&
+          ((entry.products?.length ?? 0) > 0 || (entry.lookbooks?.length ?? 0) > 0)
+      );
+
     try {
       const response = await fetch("/api/ai-support", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({
+          message,
+          exclude_product_ids: lastRecommendation?.products?.map((product) => product.id) ?? [],
+          exclude_lookbook_ids: lastRecommendation?.lookbooks?.map((lookbook) => lookbook.id) ?? [],
+        }),
       });
 
       const data = (await response.json()) as {
         success?: boolean;
+        intent?: string;
         reply?: string;
+        products?: Array<{
+          id: number;
+          name: string;
+          brand: string;
+          price: number;
+          image: string;
+        }>;
+        lookbooks?: Array<{
+          id: number;
+          title: string;
+          image: string;
+          tag: string;
+        }>;
         error?: string;
       };
 
       if (!response.ok || !data.success || !data.reply) {
-        throw new Error(data.error || "AI 客服暫時無法回覆，請稍後再試");
+        const rawError = data.error || "AI 客服暫時無法回覆，請稍後再試";
+        if (response.status === 429) {
+          throw new Error(AI_SUPPORT_RATE_LIMIT_MESSAGE);
+        }
+        throw new Error(sanitizeAiSupportClientError(rawError));
       }
 
-      setSupportMessages((previous) => [...previous, { role: "assistant", text: data.reply! }]);
+      setSupportMessages((previous) => [
+        ...previous,
+        {
+          role: "assistant",
+          text: data.reply!,
+          products: Array.isArray(data.products) ? data.products : [],
+          lookbooks: Array.isArray(data.lookbooks) ? data.lookbooks : [],
+        },
+      ]);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "AI 客服暫時無法回覆，請稍後再試";
+      const errorMessage = sanitizeAiSupportClientError(
+        error instanceof Error ? error.message : "AI 客服暫時無法回覆，請稍後再試"
+      );
       setSupportError(errorMessage);
     } finally {
       setIsSupportSending(false);
     }
+  };
+
+  const openRecommendedProduct = (productId: number) => {
+    const product = products.find((entry) => productIdsMatch(entry.id, productId));
+    if (!product) {
+      return;
+    }
+
+    openProduct(product);
+  };
+
+  const openRecommendedLookbook = (lookbookId: number) => {
+    const lookbook = lookbooks.find((entry) => Number(entry.id) === Number(lookbookId));
+    if (!lookbook) {
+      return;
+    }
+
+    setSelectedLookbook(lookbook);
+    setTab("lookbook-detail");
   };
 
   useEffect(() => {
@@ -4309,6 +4389,8 @@ export default function JGoApp({
                 onInputChange={setSupportInput}
                 onSend={() => void sendSupportMessage(supportInput)}
                 onQuickQuestion={(question) => void sendSupportMessage(question)}
+                onOpenProduct={openRecommendedProduct}
+                onOpenLookbook={openRecommendedLookbook}
               />
             </motion.div>
           )}
@@ -5733,8 +5815,26 @@ function AiSupportPanel({
   onInputChange,
   onSend,
   onQuickQuestion,
+  onOpenProduct,
+  onOpenLookbook,
 }: {
-  messages: Array<{ role: "user" | "assistant"; text: string }>;
+  messages: Array<{
+    role: "user" | "assistant";
+    text: string;
+    products?: Array<{
+      id: number;
+      name: string;
+      brand: string;
+      price: number;
+      image: string;
+    }>;
+    lookbooks?: Array<{
+      id: number;
+      title: string;
+      image: string;
+      tag: string;
+    }>;
+  }>;
   input: string;
   error: string;
   isSending: boolean;
@@ -5742,6 +5842,8 @@ function AiSupportPanel({
   onInputChange: (value: string) => void;
   onSend: () => void;
   onQuickQuestion: (question: string) => void;
+  onOpenProduct: (productId: number) => void;
+  onOpenLookbook: (lookbookId: number) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -5782,14 +5884,79 @@ function AiSupportPanel({
                 key={`${message.role}-${index}-${message.text.slice(0, 24)}`}
                 className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-6 ${
-                    message.role === "user"
-                      ? "bg-neutral-900 text-white"
-                      : "bg-neutral-100 text-neutral-800"
-                  }`}
-                >
-                  {message.text}
+                <div className={`max-w-[85%] space-y-3 ${message.role === "user" ? "" : ""}`}>
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-sm leading-6 ${
+                      message.role === "user"
+                        ? "bg-neutral-900 text-white"
+                        : "bg-neutral-100 text-neutral-800"
+                    }`}
+                  >
+                    {message.text}
+                  </div>
+
+                  {message.role === "assistant" && (message.products?.length || message.lookbooks?.length) ? (
+                    <div className="space-y-3">
+                      {message.products && message.products.length > 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-xs font-black tracking-widest text-neutral-400">推薦商品</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {message.products.map((product) => (
+                              <button
+                                key={product.id}
+                                type="button"
+                                onClick={() => onOpenProduct(product.id)}
+                                className="overflow-hidden rounded-2xl border border-neutral-200 bg-white text-left transition hover:border-neutral-900"
+                              >
+                                <div className="aspect-square overflow-hidden bg-neutral-100">
+                                  <img
+                                    src={product.image}
+                                    alt={product.name}
+                                    className="h-full w-full object-cover"
+                                  />
+                                </div>
+                                <div className="space-y-1 p-2">
+                                  <p className="line-clamp-1 text-[11px] font-bold text-neutral-500">{product.brand}</p>
+                                  <p className="line-clamp-2 text-xs font-black leading-4 text-neutral-900">{product.name}</p>
+                                  <p className="text-xs font-black">{formatPrice(product.price)}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {message.lookbooks && message.lookbooks.length > 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-xs font-black tracking-widest text-neutral-400">推薦穿搭</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {message.lookbooks.map((lookbook) => (
+                              <button
+                                key={lookbook.id}
+                                type="button"
+                                onClick={() => onOpenLookbook(lookbook.id)}
+                                className="overflow-hidden rounded-2xl border border-neutral-200 bg-white text-left transition hover:border-neutral-900"
+                              >
+                                <div className="aspect-[4/5] overflow-hidden bg-neutral-100">
+                                  <img
+                                    src={lookbook.image}
+                                    alt={lookbook.title}
+                                    className="h-full w-full object-cover"
+                                  />
+                                </div>
+                                <div className="space-y-1 p-2">
+                                  <span className="inline-block rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-black text-neutral-600">
+                                    {lookbook.tag}
+                                  </span>
+                                  <p className="line-clamp-2 text-xs font-black leading-4 text-neutral-900">{lookbook.title}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ))}

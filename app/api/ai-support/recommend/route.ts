@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { badRequestResponse, serverErrorResponse } from "@/lib/auth/require-admin";
+import { generateAiRecommendation } from "@/lib/openai/ai-recommend";
 import { parseAiRecommendRequestBody } from "@/lib/openai/ai-recommend-request";
-import { handleAiSupportMessage } from "@/lib/openai/ai-support-handler";
 import { toAiSupportErrorResponse } from "@/lib/openai/ai-support-error";
 
 export async function POST(request: NextRequest) {
@@ -23,12 +23,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await handleAiSupportMessage(parsed.message, {
-      userId: parsed.userId,
-      excludeProductIds: parsed.excludeProductIds,
-      excludeLookbookIds: parsed.excludeLookbookIds,
+    const recommendation = await generateAiRecommendation(parsed);
+    return NextResponse.json({
+      success: true,
+      intent: "recommend",
+      ...recommendation,
     });
-    return NextResponse.json(result);
   } catch (error) {
     return toAiSupportErrorResponse(error);
   }

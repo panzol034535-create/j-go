@@ -1,3 +1,8 @@
+import {
+  AI_SUPPORT_GENERIC_ERROR_MESSAGE,
+  throwOpenAiRequestError,
+} from "@/lib/openai/ai-support-error";
+
 const AI_SUPPORT_SYSTEM_PROMPT = `你是 J-GO 的客服助理。
 J-GO 是日本服飾代購平台，提供日本商品代購、AI Lookbook、整套穿搭購買。
 回答請使用繁體中文，語氣親切、簡短、清楚。
@@ -42,14 +47,14 @@ export async function generateAiSupportReply(message: string): Promise<string> {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenAI API 錯誤：${errorText}`);
+    throwOpenAiRequestError(response.status, errorText, "ai-support");
   }
 
   const data = (await response.json()) as OpenAIChatResponse;
   const reply = data.choices?.[0]?.message?.content?.trim();
 
   if (!reply) {
-    throw new Error("OpenAI 未回傳有效內容");
+    throw new Error(AI_SUPPORT_GENERIC_ERROR_MESSAGE);
   }
 
   return reply;

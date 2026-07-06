@@ -61,7 +61,7 @@ function normalizeLookbookRankingItem(lookbook: Record<string, unknown>, index: 
   };
 }
 
-async function fetchLookbookRecords(): Promise<Record<string, unknown>[]> {
+export async function fetchLookbookRecords(): Promise<Record<string, unknown>[]> {
   const lookbooksUrl = process.env.XANO_LOOKBOOKS_URL || DEFAULT_LOOKBOOKS_URL;
   const data = await fetchRevalidatedJson(lookbooksUrl);
   return toRecordArray(data);
