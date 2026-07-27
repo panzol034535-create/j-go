@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import type { ZozoProductData } from "@/lib/types/product-import";
+import { withTimeout, ZOZO_FETCH_TIMEOUT_MS } from "@/lib/zozo/with-timeout";
 
 const ZOZO_HOST_PATTERN = /^(?:https?:\/\/)?(?:www\.)?zozo\.jp/i;
 
@@ -285,6 +286,10 @@ async function fetchZozoHtml(url: string): Promise<string> {
 }
 
 export async function fetchZozoProduct(url: string): Promise<ZozoProductData> {
+  return withTimeout(fetchZozoProductInner(url), ZOZO_FETCH_TIMEOUT_MS, "source_timeout");
+}
+
+async function fetchZozoProductInner(url: string): Promise<ZozoProductData> {
   const html = await fetchZozoHtml(url);
   const jsonLd = parseJsonLd(html);
 

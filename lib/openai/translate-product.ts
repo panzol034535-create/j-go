@@ -16,7 +16,7 @@ export async function enhanceProductWithOpenAI(
     throw new Error("OPENAI_API_KEY 未設定");
   }
 
-  const prompt = `你是一位日本時尚電商 J-GO 的商品編輯。請根據以下日文商品資料，產生繁體中文內容。
+  const prompt = `你是一位日本時尚電商 LookPick 的商品編輯。請根據以下日文商品資料，產生繁體中文內容。
 
 商品名稱（日文）：${product.name_jp}
 品牌：${product.brand}

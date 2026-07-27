@@ -15,6 +15,7 @@ const buildOptions = {
   entryPoints: {
     background: join(root, "src", "background.ts"),
     content: join(root, "src", "content.ts"),
+    "admin-bridge": join(root, "src", "admin-bridge.ts"),
     options: join(root, "src", "options.ts"),
     popup: join(root, "src", "popup.ts"),
   },

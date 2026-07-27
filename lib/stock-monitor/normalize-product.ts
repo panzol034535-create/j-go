@@ -38,6 +38,7 @@ export function normalizeStockMonitorProduct(raw: Record<string, unknown>): Stoc
     image: toStringOrNull(raw.image) ?? undefined,
     source_url: String(raw.source_url || ""),
     source_site,
+    status: toStringOrNull(raw.status) ?? undefined,
     last_checked_at: toStringOrNull(raw.last_checked_at),
     last_price_jpy: toNumber(raw.last_price_jpy),
     last_stock_status: toStringOrNull(raw.last_stock_status),

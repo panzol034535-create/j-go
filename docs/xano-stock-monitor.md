@@ -33,6 +33,29 @@
 
 ## 建議 Xano API
 
+### POST update-product-status（批次同步自動下架用）
+
+若 `update-product-stock` 尚未支援 `status` 欄位，可另建此 endpoint。J-GO 會先嘗試 `XANO_UPDATE_PRODUCT_STATUS_URL`，失敗時 fallback 到 `XANO_UPDATE_PRODUCT_STOCK_URL`。
+
+Body：
+
+```json
+{
+  "product_id": 1,
+  "status": "draft",
+  "check_status": "source_missing",
+  "last_stock_status": "source_missing"
+}
+```
+
+`check_status` / `last_stock_status` 可能值：
+
+- `source_missing` — 來源商品不存在
+- `discontinued` — 來源已下架
+- `all_out_of_stock` — 全部 variant 無庫存
+
+環境變數：`XANO_UPDATE_PRODUCT_STATUS_URL`
+
 ### GET stock-monitor-products
 
 回傳 `source_url` 不為空的商品，供 `/admin/stock-monitor` 列表使用。

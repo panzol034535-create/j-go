@@ -3,11 +3,22 @@ import {
   STORAGE_KEY_API_BASE_URL,
   type BackgroundMessage,
   type BackgroundResponse,
+  type ExtensionBulkSyncProduct,
   type ImportProductPayload,
   type ImportProductResponse,
   type SyncProductStockPayload,
   type SyncProductStockResponse,
 } from "./types";
+import {
+  cancelBulkStockSync,
+  getBulkSyncProgress,
+  getBulkSyncProgressFromStorage,
+  resolveBulkScrapeResult,
+  resumeBatchStockSync,
+  startBatchStockSync,
+} from "./bulk-stock-sync";
+import type { ExtensionBulkSyncScrapePayload } from "./bulk-stock-sync-types";
+import { resolveImportErrorMessage } from "./variant-create-errors";
 
 async function getApiBaseUrl(): Promise<string> {
   const stored = await chrome.storage.sync.get(STORAGE_KEY_API_BASE_URL);
@@ -62,9 +73,11 @@ async function importProduct(payload: ImportProductPayload): Promise<BackgroundR
     const data = await readJsonResponse<ImportProductResponse>(response);
 
     if (!response.ok) {
+      const failedVariants = Array.isArray(data.failedVariants) ? data.failedVariants : [];
       return {
         ok: false,
-        error: data.error || `匯入失敗（HTTP ${response.status}）`,
+        error: resolveImportErrorMessage(data),
+        failedVariants,
       };
     }
 
@@ -104,11 +117,84 @@ async function syncProductStock(payload: SyncProductStockPayload): Promise<Backg
   }
 }
 
+type StockSyncItem = {
+  id?: number;
+  product_id?: number;
+  name: string;
+  source_url: string;
+};
+
+function normalizeStockSyncItems(items: unknown): ExtensionBulkSyncProduct[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item) => {
+      const entry = item as StockSyncItem;
+      const id = Number(entry.product_id ?? entry.id);
+      const name = typeof entry.name === "string" ? entry.name : "";
+      const source_url = typeof entry.source_url === "string" ? entry.source_url : "";
+
+      if (!Number.isFinite(id) || id <= 0 || !source_url) {
+        return null;
+      }
+
+      return { id, name, source_url };
+    })
+    .filter((item): item is ExtensionBulkSyncProduct => item !== null);
+}
+
+async function handleAdminBridgeMessage(message: {
+  adminType: string;
+  products?: ExtensionBulkSyncProduct[];
+}): Promise<Record<string, unknown>> {
+  if (message.adminType === "JGO_EXTENSION_BULK_SYNC_STATUS") {
+    const progress = getBulkSyncProgress() ?? (await getBulkSyncProgressFromStorage());
+    return {
+      type: "JGO_EXTENSION_BULK_SYNC_PROGRESS",
+      progress,
+    };
+  }
+
+  if (message.adminType === "JGO_EXTENSION_BULK_SYNC_CANCEL") {
+    cancelBulkStockSync();
+    return { type: "JGO_EXTENSION_BULK_SYNC_CANCELLED" };
+  }
+
+  return { type: "JGO_EXTENSION_BULK_SYNC_ERROR", error: "Unknown admin bridge message" };
+}
+
+const NOTIFICATION_ONLY_MESSAGE_TYPES = new Set([
+  "JGO_STOCK_SYNC_PROGRESS",
+  "BULK_SYNC_PROGRESS",
+]);
+
+type RuntimeMessage = BackgroundMessage & {
+  type: string;
+  adminType?: string;
+  products?: ExtensionBulkSyncProduct[];
+  items?: StockSyncItem[];
+  payload?: ExtensionBulkSyncScrapePayload;
+  product_id?: number;
+  adminTabId?: number;
+};
+
 chrome.runtime.onMessage.addListener(
-  (message: BackgroundMessage, _sender, sendResponse: (response: BackgroundResponse) => void) => {
+  (
+    message: RuntimeMessage,
+    sender,
+    sendResponse: (response: BackgroundResponse | Record<string, unknown>) => void
+  ) => {
+    const type = message?.type;
+
+    if (!type || NOTIFICATION_ONLY_MESSAGE_TYPES.has(type)) {
+      return false;
+    }
+
     let responded = false;
 
-    const respond = (response: BackgroundResponse) => {
+    const respond = (response: BackgroundResponse | Record<string, unknown>) => {
       if (responded) {
         return;
       }
@@ -122,28 +208,83 @@ chrome.runtime.onMessage.addListener(
       }
     };
 
+    if (type === "JGO_START_STOCK_SYNC" || type === "JGO_RESUME_STOCK_SYNC") {
+      try {
+        const items = normalizeStockSyncItems(message.items);
+        const explicitAdminTabId = Number(message.adminTabId);
+        console.log("JGO EXT BG START RECEIVED", type, items.length);
+
+        if (type === "JGO_START_STOCK_SYNC" && items.length === 0) {
+          respond({ success: false, error: "沒有可同步商品" });
+          return true;
+        }
+
+        const adminTabId =
+          Number.isFinite(explicitAdminTabId) && explicitAdminTabId > 0
+            ? explicitAdminTabId
+            : sender.tab?.id;
+
+        respond({ success: true, accepted: true });
+
+        setTimeout(() => {
+          const task =
+            type === "JGO_RESUME_STOCK_SYNC"
+              ? resumeBatchStockSync(adminTabId)
+              : startBatchStockSync(items, adminTabId);
+
+          void task.catch((error) => {
+            console.error("JGO EXT BG LOOP START FAILED", error);
+          });
+        }, 0);
+      } catch (error) {
+        respond({ success: false, error: String(error) });
+      }
+
+      return true;
+    }
+
     void (async () => {
       try {
-        if (message.type === "GET_API_BASE_URL") {
+        if (type === "GET_ADMIN_TAB_ID") {
+          respond({ tabId: sender.tab?.id ?? null });
+          return;
+        }
+
+        if (type === "GET_API_BASE_URL") {
           const apiBaseUrl = await getApiBaseUrl();
           respond({ ok: true, apiBaseUrl });
           return;
         }
 
-        if (message.type === "IMPORT_PRODUCT") {
+        if (type === "IMPORT_PRODUCT") {
           respond(await importProduct(message.payload));
           return;
         }
 
-        if (message.type === "SYNC_PRODUCT_STOCK") {
+        if (type === "SYNC_PRODUCT_STOCK") {
           respond(await syncProductStock(message.payload));
+          return;
+        }
+
+        if (type === "ADMIN_BRIDGE") {
+          respond(
+            await handleAdminBridgeMessage({
+              adminType: String(message.adminType || ""),
+              products: message.products,
+            })
+          );
+          return;
+        }
+
+        if (type === "BULK_SYNC_SCRAPE_RESULT" && message.payload && message.product_id) {
+          resolveBulkScrapeResult(message.product_id, message.payload);
+          respond({ ok: true });
           return;
         }
 
         respond({ ok: false, error: "Unknown message type" });
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        respond({ ok: false, error: errorMessage });
+        respond({ ok: false, error: String(error) });
       }
     })();
 

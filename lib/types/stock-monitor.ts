@@ -20,6 +20,7 @@ export type StockMonitorProduct = {
   image?: string;
   source_url: string;
   source_site: SourceSite;
+  status?: string;
   last_checked_at: string | null;
   last_price_jpy: number | null;
   last_stock_status: StockStatus | string | null;

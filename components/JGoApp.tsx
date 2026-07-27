@@ -85,7 +85,11 @@ import {
   toggleFavoriteLookbookId,
 } from "@/lib/lookbook-favorites";
 import { formatLookbookList, type FormattedLookbook } from "@/lib/lookbooks/format-lookbook-list";
+import { LOOKPICK_BRAND } from "@/lib/brand";
 import { formatXanoProducts, type FormattedXanoProduct } from "@/lib/products/format-xano-product";
+import {
+  filterPublishedProducts,
+} from "@/lib/products/store-product-visibility";
 import { hasInitialRankings, type InitialRankings } from "@/lib/home-initial-data";
 import { AI_SUPPORT_FAQ_ITEMS, JGO_HUMAN_SUPPORT } from "@/lib/support-contacts";
 import type { HomePageData } from "@/lib/server/home-data";
@@ -263,7 +267,7 @@ function buildBrandIntroText(product: FormattedXanoProduct | null | undefined) {
   if (!brand) return "";
 
   return [
-    `${brand} 為 J-GO 精選日本品牌。`,
+    `${brand} 為 LookPick 精選日本品牌。`,
     product?.tag ? `系列標籤：${product.tag}` : "",
     "點擊品牌名稱可查看更多同品牌商品。",
   ].filter(Boolean).join("\n");
@@ -443,7 +447,7 @@ function buildJGoUserFromClerk(clerkUser: ClerkUserResource): JGoUser {
 
   return {
     id: clerkUser.id,
-    name: metadataName || clerkUser.fullName || clerkUser.firstName || "J-GO 會員",
+    name: metadataName || clerkUser.fullName || clerkUser.firstName || "LookPick 會員",
     email: clerkUser.primaryEmailAddress?.emailAddress || "",
     phone: metadataPhone || clerkUser.primaryPhoneNumber?.phoneNumber || "",
     provider: "Clerk",
@@ -455,7 +459,8 @@ export default function JGoApp({
   initialLookbooks,
   initialRankings = EMPTY_INITIAL_RANKINGS,
 }: HomePageData) {
-  const hasInitialProducts = initialProducts.length > 0;
+  const visibleInitialProducts = filterPublishedProducts(initialProducts);
+  const hasInitialProducts = visibleInitialProducts.length > 0;
   const hasInitialLookbooks = initialLookbooks.length > 0;
   const hasInitialRankingsData = hasInitialRankings(initialRankings);
   const { user, isSignedIn } = useUser();
@@ -468,7 +473,7 @@ export default function JGoApp({
     [user?.id]
   );
   const [tab, setTab] = useState("home");
-  const [products, setProducts] = useState<FormattedXanoProduct[]>(initialProducts);
+  const [products, setProducts] = useState<FormattedXanoProduct[]>(visibleInitialProducts);
   const [lookbooks, setLookbooks] = useState<FormattedLookbook[]>(initialLookbooks);
   const [selectedLookbook, setSelectedLookbook] = useState<FormattedLookbook | null>(null);
   const [outfitSelections, setOutfitSelections] = useState<Record<number, OutfitSelection>>({});
@@ -695,15 +700,18 @@ export default function JGoApp({
   }, [delivery]);
 
   const applyProducts = (nextProducts: FormattedXanoProduct[]) => {
-    if (!Array.isArray(nextProducts) || nextProducts.length === 0) return;
+    const visibleProducts = filterPublishedProducts(nextProducts);
+    if (!Array.isArray(visibleProducts) || visibleProducts.length === 0) return;
 
-    setProducts(nextProducts);
+    setProducts(visibleProducts);
     setSelectedProduct((prev) => {
-      const sameProduct = nextProducts.find((product) => productIdsMatch(product.id, prev?.id));
-      return sameProduct || nextProducts[0];
+      const sameProduct = visibleProducts.find((product) => productIdsMatch(product.id, prev?.id));
+      return sameProduct || visibleProducts[0];
     });
 
-    const activeProduct = nextProducts.find((product) => productIdsMatch(product.id, selectedProduct?.id)) || nextProducts[0];
+    const activeProduct =
+      visibleProducts.find((product) => productIdsMatch(product.id, selectedProduct?.id)) ||
+      visibleProducts[0];
     if (!activeProduct) {
       return;
     }
@@ -748,7 +756,9 @@ export default function JGoApp({
 
         const data = await response.json();
         const productList = Array.isArray(data.products) ? data.products : Array.isArray(data) ? data : [];
-        const formattedProducts = formatXanoProducts(productList);
+        const formattedProducts = filterPublishedProducts(
+          formatXanoProducts(filterPublishedProducts(productList))
+        );
 
         console.log("PRODUCT API COUNT", formattedProducts.length);
 
@@ -1162,7 +1172,10 @@ export default function JGoApp({
     }
   };
 
-  const productCatalog = useMemo(() => resolveProductCatalog(products), [products]);
+  const productCatalog = useMemo(
+    () => filterPublishedProducts(resolveProductCatalog(products)),
+    [products]
+  );
 
   const catalogFilteredProducts = productCatalog.filter((product) => {
     const genderMatched =
@@ -1210,23 +1223,14 @@ export default function JGoApp({
         const productId = Number(item.id ?? item.product_id);
         const localProduct = findProductById(productCatalog, productId);
 
-        if (!localProduct && !item.name) {
+        if (!localProduct) {
           return null;
         }
 
         return {
-          ...(localProduct || {
-            id: productId,
-            name: typeof item.name === "string" ? item.name : "",
-            brand: typeof item.brand === "string" ? item.brand : "",
-            price: Number(item.price) || 0,
-            image: typeof item.image === "string" ? item.image : "",
-            tag: typeof item.tag === "string" ? item.tag : "日本選品",
-          }),
+          ...localProduct,
           rank: index + 1,
-          favoriteCount: localProduct != null
-            ? Math.max(0, Number(localProduct.favoriteCount ?? 0) || 0)
-            : Number(item.favorite_count ?? item.favoriteCount ?? 0) || 0,
+          favoriteCount: Math.max(0, Number(localProduct.favoriteCount ?? 0) || 0),
         };
       })
       .filter((item) => item != null) as RankedProduct[],
@@ -1248,7 +1252,7 @@ export default function JGoApp({
           ...(localLookbook || {
             id: lookbookId,
             lookbook_id: lookbookId,
-            title: typeof item.title === "string" ? item.title : "J-GO Lookbook",
+            title: typeof item.title === "string" ? item.title : "LookPick Lookbook",
             image: typeof item.image === "string" ? item.image : "",
             tag: typeof item.tag === "string" ? item.tag : typeof item.style_tag === "string" ? item.style_tag : "AI LOOKBOOK",
             gender: typeof item.gender === "string" ? item.gender : "unisex",
@@ -1611,25 +1615,29 @@ export default function JGoApp({
   useEffect(() => {
     queueMicrotask(() => {
       if (hasInitialProducts) {
-        saveProductsCacheV2(initialProducts);
+        saveProductsCacheV2(visibleInitialProducts);
       } else {
         let productsHasData = false;
 
         try {
-          const cachedProducts = readProductsCacheV2();
+          const cachedProducts = filterPublishedProducts(
+            readProductsCacheV2<FormattedXanoProduct>() ?? []
+          );
           if (Array.isArray(cachedProducts) && cachedProducts.length > 0) {
             console.log("PRODUCT CACHE COUNT", cachedProducts.length);
-            applyProducts(cachedProducts as FormattedXanoProduct[]);
+            applyProducts(cachedProducts);
             setHasProductsCache(true);
             setLoadingProducts(false);
             setIsHomeDataLoading(false);
             productsHasData = true;
           } else {
-            const legacyHomeProducts = readHomeProductsCache();
+            const legacyHomeProducts = filterPublishedProducts(
+              readHomeProductsCache<FormattedXanoProduct>() ?? []
+            );
             if (Array.isArray(legacyHomeProducts) && legacyHomeProducts.length > 0) {
               console.log("PRODUCT CACHE COUNT", legacyHomeProducts.length);
-              applyProducts(legacyHomeProducts as FormattedXanoProduct[]);
-              saveProductsCacheV2(legacyHomeProducts as FormattedXanoProduct[]);
+              applyProducts(legacyHomeProducts);
+              saveProductsCacheV2(legacyHomeProducts);
               setHasProductsCache(true);
               setLoadingProducts(false);
               setIsHomeDataLoading(false);
@@ -1705,7 +1713,7 @@ export default function JGoApp({
     }
   };
 
-  const brandOptions = ["all", ...Array.from(new Set(products.map((product) => product.brand).filter(Boolean)))];
+  const brandOptions = ["all", ...Array.from(new Set(productCatalog.map((product) => product.brand).filter(Boolean)))];
   const homeBrandOptions = brandOptions.filter((brand) => brand !== "all").slice(0, 8);
   const featuredProduct = catalogFilteredProducts[0] || products[0];
 
@@ -1918,7 +1926,7 @@ export default function JGoApp({
   };
 
   const openRecommendedProduct = (productId: number) => {
-    const product = products.find((entry) => productIdsMatch(entry.id, productId));
+    const product = findProductById(productCatalog, productId);
     if (!product) {
       return;
     }
@@ -2095,7 +2103,7 @@ export default function JGoApp({
 
   const getLookbookProducts = (lookbook) => {
     if (!lookbook?.product_ids?.length) return [];
-    return products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
+    return productCatalog.filter((product) => lookbook.product_ids.includes(Number(product.id)));
   };
 
   const getDefaultOutfitSelection = (product) => {
@@ -2326,7 +2334,7 @@ export default function JGoApp({
   };
 
   const loginWithGoogle = () => {
-    const user = { name: "J-GO 會員", email: "demo@gmail.com", phone: "0912345678", provider: "Google" };
+    const user = { name: "LookPick 會員", email: "demo@gmail.com", phone: "0912345678", provider: "Google" };
     setCurrentUser(user);
     localStorage.setItem("jgo_current_user", JSON.stringify(user));
     setAccountForm({ name: user.name, email: user.email, phone: user.phone });
@@ -2336,7 +2344,7 @@ export default function JGoApp({
 
   const submitAuth = () => {
     const user = {
-      name: authForm.name || "J-GO 會員",
+      name: authForm.name || "LookPick 會員",
       email: authForm.email || "demo@example.com",
       phone: authForm.phone || "0912345678",
       provider: authMode === "register" ? "Email 註冊" : "Email 登入",
@@ -2353,7 +2361,7 @@ export default function JGoApp({
       return;
     }
 
-    const name = accountForm.name.trim() || "J-GO 會員";
+    const name = accountForm.name.trim() || "LookPick 會員";
     const phone = accountForm.phone.trim();
 
     try {
@@ -2975,13 +2983,18 @@ export default function JGoApp({
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
       <div className="mx-auto flex h-[100dvh] max-h-[100dvh] max-w-md flex-col bg-white shadow-2xl">
-        <header className="sticky top-0 z-10 border-b bg-white/90 px-5 py-4 backdrop-blur">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-neutral-500">From Japan, To You</p>
-              <h1 className="text-2xl font-black tracking-tight">J-GO</h1>
-            </div>
-            <div className="flex items-center gap-2">
+        <header className="lookpick-header sticky top-0 z-10 border-b bg-white/90 py-4 pr-5 pl-0 backdrop-blur">
+          <div className="lookpick-header-row flex items-center justify-between">
+            <button
+              type="button"
+              className="lookpick-header-wordmark"
+              onClick={() => setTab("home")}
+              aria-label="回到首頁"
+            >
+              <span className="lookpick-header-look">Look</span>
+              <span className="lookpick-header-pick">Pick</span>
+            </button>
+            <div className="lookpick-header-actions flex shrink-0 items-center gap-2">
             <button
               onClick={() => setTab("account")}
               className="rounded-full border border-neutral-200 bg-white p-3 text-neutral-700 transition hover:bg-neutral-50 active:scale-[0.98] active:bg-neutral-100"
@@ -3013,6 +3026,14 @@ export default function JGoApp({
         <main className="min-h-0 flex-1 overflow-y-auto px-5 pt-5 pb-[calc(7rem+env(safe-area-inset-bottom))]">
           {tab === "home" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <section className="hidden overflow-hidden rounded-[2rem] bg-white shadow-sm ring-1 ring-neutral-100 md:block">
+                <img
+                  src={LOOKPICK_BRAND.brandHeroSrc}
+                  alt={LOOKPICK_BRAND.name}
+                  className="h-auto w-full object-cover"
+                />
+              </section>
+
               <section className="space-y-4">
                 <button
                   onClick={() => setTab("shop")}
@@ -3425,7 +3446,7 @@ export default function JGoApp({
                   {lookbooks
                     .filter((lookbook) => activeGender === "all" || lookbook.gender === activeGender || (activeGender !== "all" && lookbook.gender === "unisex"))
                     .map((lookbook, index) => {
-                      const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
+                      const relatedProducts = productCatalog.filter((product) => lookbook.product_ids.includes(Number(product.id)));
                       const outfitTotal = relatedProducts.reduce((sum, product) => sum + Number(product.price || 0), 0);
 
                       return (
@@ -4151,7 +4172,7 @@ export default function JGoApp({
                   ) : (
                     <div className="space-y-4">
                       {favoriteLookbooks.map((lookbook) => {
-                        const relatedProducts = products.filter((product) => lookbook.product_ids.includes(Number(product.id)));
+                        const relatedProducts = productCatalog.filter((product) => lookbook.product_ids.includes(Number(product.id)));
 
                         return (
                           <Card key={lookbook.id} className="overflow-hidden rounded-[2rem] border-neutral-100 shadow-sm">
@@ -4439,6 +4460,18 @@ export default function JGoApp({
                       </span>
                     </Button>
 
+                    <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold text-neutral-500">
+                      <a className="rounded-2xl border border-neutral-200 bg-white px-2 py-3 transition hover:text-neutral-950" href="/privacy-policy">
+                        隱私權政策
+                      </a>
+                      <a className="rounded-2xl border border-neutral-200 bg-white px-2 py-3 transition hover:text-neutral-950" href="/terms-of-service">
+                        服務條款
+                      </a>
+                      <a className="rounded-2xl border border-neutral-200 bg-white px-2 py-3 transition hover:text-neutral-950" href="/refund-policy">
+                        退換貨政策
+                      </a>
+                    </div>
+
                     <div className="flex items-center justify-between rounded-2xl bg-neutral-50 px-4 py-3">
                       <span className="text-sm font-black text-neutral-600">帳號設定 / 登出</span>
                       <UserButton />
@@ -4452,7 +4485,7 @@ export default function JGoApp({
                       <User size={28} />
                     </div>
                     <div>
-                      <h3 className="text-xl font-black">登入 J-GO 會員</h3>
+                      <h3 className="text-xl font-black">登入 LookPick 會員</h3>
                       <p className="mt-1 text-sm leading-6 text-neutral-500">登入後可以加入購物車、查看訂單與物流資訊。</p>
                     </div>
 
@@ -4477,6 +4510,18 @@ export default function JGoApp({
                         AI 客服中心
                       </span>
                     </Button>
+
+                    <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold text-neutral-500">
+                      <a className="rounded-2xl border border-neutral-200 bg-white px-2 py-3 transition hover:text-neutral-950" href="/privacy-policy">
+                        隱私權政策
+                      </a>
+                      <a className="rounded-2xl border border-neutral-200 bg-white px-2 py-3 transition hover:text-neutral-950" href="/terms-of-service">
+                        服務條款
+                      </a>
+                      <a className="rounded-2xl border border-neutral-200 bg-white px-2 py-3 transition hover:text-neutral-950" href="/refund-policy">
+                        退換貨政策
+                      </a>
+                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -4877,7 +4922,7 @@ export default function JGoApp({
                 <CardContent className="space-y-3 p-4">
                   <h3 className="font-black">{editingProductId ? "編輯商品" : "新增商品"}</h3>
                   <Input label="商品名稱" placeholder="日系寬版襯衫" value={productForm.name} onChange={(value) => setProductForm({ ...productForm, name: value })} />
-                  <Input label="品牌" placeholder="J-GO SELECT" value={productForm.brand} onChange={(value) => setProductForm({ ...productForm, brand: value })} />
+                  <Input label="品牌" placeholder="LookPick SELECT" value={productForm.brand} onChange={(value) => setProductForm({ ...productForm, brand: value })} />
                   <Input label="日幣價格（¥）" placeholder="8900" value={productForm.jpy_price} onChange={(value) => setProductForm({ ...productForm, jpy_price: value })} />
                   <p className="rounded-2xl bg-neutral-50 px-4 py-3 text-xs font-bold leading-5 text-neutral-500">
                     台幣售價會由 Xano 的 jpy_rate × profit_rate 自動重算，前端後台不用手動輸入台幣價格。
@@ -5876,7 +5921,7 @@ function AiSupportPanel({
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
             {messages.length === 0 ? (
               <div className="rounded-2xl bg-neutral-50 px-4 py-3 text-sm leading-6 text-neutral-600">
-                你好，我是 J-GO AI 客服。可以選擇上方常見問題，或直接輸入想詢問的內容。
+                你好，我是 LookPick AI 客服。可以選擇上方常見問題，或直接輸入想詢問的內容。
               </div>
             ) : null}
             {messages.map((message, index) => (

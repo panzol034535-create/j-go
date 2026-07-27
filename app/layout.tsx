@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { clerkAppearance } from "@/lib/clerk-appearance";
 import { clerkLocalization } from "@/lib/clerk-localization";
+import { LOOKPICK_BRAND } from "@/lib/brand";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -17,8 +18,24 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "J-GO",
-  description: "From Japan, To You",
+  title: LOOKPICK_BRAND.name,
+  description: LOOKPICK_BRAND.description,
+  openGraph: {
+    title: LOOKPICK_BRAND.name,
+    description: LOOKPICK_BRAND.description,
+    images: [
+      {
+        url: LOOKPICK_BRAND.brandHeroSrc,
+        alt: LOOKPICK_BRAND.name,
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: LOOKPICK_BRAND.name,
+    description: LOOKPICK_BRAND.description,
+    images: [LOOKPICK_BRAND.brandHeroSrc],
+  },
 };
 
 export default function RootLayout({

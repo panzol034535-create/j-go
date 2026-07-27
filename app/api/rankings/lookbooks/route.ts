@@ -15,7 +15,7 @@ function normalizeLookbookRankingItem(lookbook: Record<string, unknown>, index: 
   return {
     id,
     lookbook_id: lookbook.lookbook_id || lookbook.id || id,
-    title: lookbook.title || "J-GO Lookbook",
+    title: lookbook.title || "LookPick Lookbook",
     image: lookbook.image || "",
     tag: lookbook.tag || lookbook.style_tag || "AI LOOKBOOK",
     gender: lookbook.gender || "unisex",

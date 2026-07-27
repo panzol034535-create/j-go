@@ -27,6 +27,9 @@ export function normalizeSize(size: string): string {
     case "X-LARGE":
     case "XL":
       return "XL";
+    case "F":
+    case "FREE":
+      return "FREE";
     default:
       return size.trim();
   }

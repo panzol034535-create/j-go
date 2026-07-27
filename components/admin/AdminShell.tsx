@@ -44,7 +44,7 @@ export function AdminShell({ title, children }: AdminShellProps) {
         <header className="sticky top-0 z-10 border-b border-neutral-100 bg-white/90 px-5 py-4 backdrop-blur">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-bold tracking-widest text-neutral-400">J-GO ADMIN</p>
+              <p className="text-xs font-bold tracking-widest text-neutral-400">LOOKPICK ADMIN</p>
               <h1 className="text-xl font-black tracking-tight">{title}</h1>
             </div>
             <Link href="/" className="text-xs font-bold text-neutral-500 hover:text-neutral-900">

@@ -22,6 +22,14 @@ import {
 import { normalizeProductGender, type ProductGender } from "@/lib/products/product-gender";
 import { parseSourceProductIdFromUrl } from "@/lib/products/parse-source-product-id";
 import { normalizeSizeTableRows, parseSizeTableJson } from "@/lib/products/size-table-json";
+import {
+  dedupeVariantStockEntries,
+  formatFailedVariantsMessage,
+  isDuplicateVariantError,
+  resolveVariantFailureReason,
+  type FailedVariantDetail,
+} from "@/lib/import-product/variant-create-errors";
+import { normalizeColor } from "@/lib/products/color-normalize";
 
 type ImportRequestBody = {
   url?: string;
@@ -181,12 +189,17 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const RATE_LIMIT_RETRY_DELAY_MS = 20_000;
+const RATE_LIMIT_MAX_RETRIES = 1;
+
 async function createVariantWithRetry(
   variantUrl: string,
   variantPayload: VariantPayload
-): Promise<boolean> {
-  const maxRetries = 3;
-  let retries = 0;
+): Promise<
+  | { ok: true }
+  | { ok: false; status: number; responseText: string; reason: string }
+> {
+  let rateLimitRetries = 0;
 
   while (true) {
     console.log("VARIANT PAYLOAD", variantPayload);
@@ -203,22 +216,42 @@ async function createVariantWithRetry(
     console.log("VARIANT RESPONSE", responseText);
 
     if (response.ok) {
-      return true;
+      return { ok: true };
     }
 
-    if (response.status === 429 && retries < maxRetries) {
-      retries += 1;
-      await delay(3000);
+    if (isDuplicateVariantError(response.status, responseText)) {
+      console.log("SKIP DUPLICATE VARIANT", {
+        product_id: variantPayload.product_id,
+        color: variantPayload.color,
+        size: variantPayload.size,
+      });
+      return { ok: true };
+    }
+
+    if (response.status === 429 && rateLimitRetries < RATE_LIMIT_MAX_RETRIES) {
+      rateLimitRetries += 1;
+      await delay(RATE_LIMIT_RETRY_DELAY_MS);
       continue;
     }
 
-    console.error(
-      "XANO VARIANT ERROR",
-      variantPayload,
-      response.status,
-      responseText
-    );
-    return false;
+    const reason = resolveVariantFailureReason(response.status, responseText);
+
+    console.error("CREATE VARIANT FAILED", {
+      product_id: variantPayload.product_id,
+      color: variantPayload.color,
+      size: variantPayload.size,
+      stock_status: variantPayload.stock_status,
+      stock_qty: variantPayload.stock,
+      status: response.status,
+      responseText,
+    });
+
+    return {
+      ok: false,
+      status: response.status,
+      responseText,
+      reason,
+    };
   }
 }
 
@@ -452,7 +485,9 @@ export async function POST(request: NextRequest) {
     : [];
 
   const productBrand = productData.brand.trim();
-  const filteredVariantStock = filterVariantStockByColor(variantStockFromBody, productBrand);
+  const filteredVariantStock = dedupeVariantStockEntries(
+    filterVariantStockByColor(variantStockFromBody, productBrand)
+  );
 
   console.log("IMPORT BODY", body);
   console.log("IMPORT FILTERED VARIANT STOCK", filteredVariantStock);
@@ -551,9 +586,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const failedVariants: VariantPayload[] = [];
+    const failedVariants: FailedVariantDetail[] = [];
+    const createdVariantKeys = new Set<string>();
 
     for (const entry of filteredVariantStock) {
+      const variantKey = `${productId}::${normalizeColor(entry.color)}::${normalizeSize(entry.size)}`;
+      if (createdVariantKeys.has(variantKey)) {
+        console.log("SKIP DUPLICATE VARIANT", {
+          product_id: productId,
+          color: entry.color,
+          size: entry.size,
+        });
+        continue;
+      }
+
+      createdVariantKeys.add(variantKey);
+
       const variantPayload: VariantPayload = {
         product_id: productId,
         color: entry.color,
@@ -562,20 +610,32 @@ export async function POST(request: NextRequest) {
         stock: 0,
       };
 
-      const success = await createVariantWithRetry(variantUrl, variantPayload);
-      if (!success) {
-        failedVariants.push(variantPayload);
+      const result = await createVariantWithRetry(variantUrl, variantPayload);
+      if (!result.ok) {
+        failedVariants.push({
+          color: variantPayload.color,
+          size: variantPayload.size,
+          stock_status: variantPayload.stock_status,
+          stock_qty: variantPayload.stock,
+          reason: result.reason,
+          status: result.status,
+          responseText: result.responseText,
+        });
       }
 
       await delay(250);
     }
 
     if (failedVariants.length > 0) {
-      return importFailureResponse(
-        "匯入失敗",
-        `商品已建立，但有 ${failedVariants.length} 個 variant 建立失敗`,
-        JSON.stringify({ failedVariants, productId }),
-        502
+      return NextResponse.json(
+        {
+          success: false,
+          message: "匯入失敗",
+          error: formatFailedVariantsMessage(failedVariants),
+          productId,
+          failedVariants,
+        },
+        { status: 502 }
       );
     }
 

@@ -7,6 +7,10 @@ import {
 } from "@/lib/products/product-fields";
 import { detectSourceSite } from "@/lib/products/source-site";
 import { parseSizeTableJson } from "@/lib/products/size-table-json";
+import {
+  filterPublishedProducts,
+  getProductPublishStatus,
+} from "@/lib/products/store-product-visibility";
 
 function parseProductImages(product: Record<string, unknown>): string[] {
   const raw = product.images;
@@ -42,8 +46,15 @@ function parseProductImages(product: Record<string, unknown>): string[] {
   return [];
 }
 
-export function formatXanoProducts(productList: Record<string, unknown>[]) {
-  return productList.map((product) => {
+export function formatXanoProducts(
+  productList: Record<string, unknown>[],
+  options?: { includeUnpublished?: boolean }
+) {
+  const visibleProducts = options?.includeUnpublished
+    ? productList
+    : filterPublishedProducts(productList);
+
+  return visibleProducts.map((product) => {
     const images = parseProductImages(product);
     const color_images = parseProductColorImages(product.color_images);
     const variants = parseProductVariants(product);
@@ -94,6 +105,8 @@ export function formatXanoProducts(productList: Record<string, unknown>[]) {
       source_site: String(source_site),
       source_product_id: String(source_product_id),
       favoriteCount: Number(product.favorite_count) || 0,
+      status: getProductPublishStatus(product),
+      check_status: String(product.check_status ?? ""),
     };
   });
 }

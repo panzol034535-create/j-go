@@ -21,8 +21,8 @@ import {
 
 const AI_RECOMMEND_MODEL = "gpt-4o-mini";
 
-const AI_RECOMMEND_SYSTEM_PROMPT = `你是 J-GO 的日系穿搭導購 AI。
-你會看到 J-GO 現有商品與 Lookbook 的文字資料和圖片。
+const AI_RECOMMEND_SYSTEM_PROMPT = `你是 LookPick 的日系穿搭導購 AI。
+你會看到 LookPick 現有商品與 Lookbook 的文字資料和圖片。
 請根據使用者需求，從列表中挑選最適合的商品與 Lookbook。
 你只能推薦列表中存在的 id。
 不可編造商品、價格、庫存、折扣。
@@ -36,7 +36,7 @@ const AI_RECOMMEND_SYSTEM_PROMPT = `你是 J-GO 的日系穿搭導購 AI。
   "lookbook_ids": number[]
 }`;
 
-const AI_PRESCREEN_SYSTEM_PROMPT = `你是 J-GO 的穿搭導購預篩 AI。
+const AI_PRESCREEN_SYSTEM_PROMPT = `你是 LookPick 的穿搭導購預篩 AI。
 根據使用者需求，從商品與 Lookbook 列表中挑出最可能符合的候選。
 你只能選擇列表中存在的 id。
 不可編造 id。

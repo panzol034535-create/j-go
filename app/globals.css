@@ -24,3 +24,66 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.lookpick-wordmark {
+  font-weight: 900;
+  font-size: 24px;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.lookpick-wordmark-look {
+  color: #111111;
+}
+
+.lookpick-wordmark-pick {
+  color: #f28f92;
+}
+
+.lookpick-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lookpick-header-actions {
+  margin-left: auto;
+}
+
+button.lookpick-header-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  padding-left: 32px;
+  margin-right: auto;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-family: "Times New Roman", Georgia, serif;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  color: inherit;
+}
+
+button.lookpick-header-wordmark .lookpick-header-look {
+  color: #111111;
+}
+
+button.lookpick-header-wordmark .lookpick-header-pick {
+  color: #f08f92;
+  margin-left: 1px;
+}
+
+button.lookpick-header-wordmark:hover .lookpick-header-pick {
+  color: #ea7f83;
+}
+
+@media (max-width: 480px) {
+  button.lookpick-header-wordmark {
+    padding-left: 28px;
+    font-size: 32px;
+  }
+}

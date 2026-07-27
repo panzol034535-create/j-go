@@ -1,4 +1,4 @@
-const AI_INTENT_SYSTEM_PROMPT = `你是 J-GO 客服訊息分類器。
+const AI_INTENT_SYSTEM_PROMPT = `你是 LookPick 客服訊息分類器。
 請判斷使用者訊息屬於哪一類：
 - recommend：想找商品、衣服、穿搭、Lookbook、風格、預算、場合、性別、尺寸推薦
 - order：查詢訂單、付款、出貨、物流、門市、訂單狀態

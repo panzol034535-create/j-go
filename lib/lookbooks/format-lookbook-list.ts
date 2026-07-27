@@ -7,7 +7,7 @@ export function formatLookbookList(list: Record<string, unknown>[]) {
     return {
       id,
       lookbook_id: Number(lookbook.lookbook_id || lookbook.id || id),
-      title: String(lookbook.title || "J-GO Lookbook"),
+      title: String(lookbook.title || "LookPick Lookbook"),
       image: String(lookbook.image || ""),
       tag: String(lookbook.tag || lookbook.style_tag || "AI LOOKBOOK"),
       gender: String(lookbook.gender || "unisex"),

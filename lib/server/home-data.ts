@@ -1,13 +1,14 @@
 import { formatLookbookList } from "@/lib/lookbooks/format-lookbook-list";
 import { resolveLookbookId } from "@/lib/lookbook-favorites";
 import { formatXanoProducts } from "@/lib/products/format-xano-product";
+import { filterPublishedProducts } from "@/lib/products/store-product-visibility";
 import type { InitialRankings } from "@/lib/home-initial-data";
 import {
   sortRecordsByFavoriteCount,
   toRecordArray,
 } from "@/lib/rankings/ranking-response";
 import { fetchXanoSalesRankings } from "@/lib/rankings/xano-sales-rankings";
-import { fetchMergedProducts } from "@/lib/server/fetch-products";
+import { fetchPublishedStoreProducts } from "@/lib/server/fetch-products";
 import { fetchRevalidatedJson } from "@/lib/server/fetch-revalidated";
 
 const DEFAULT_LOOKBOOKS_URL =
@@ -49,7 +50,7 @@ function normalizeLookbookRankingItem(lookbook: Record<string, unknown>, index: 
   return {
     id,
     lookbook_id: lookbook.lookbook_id || lookbook.id || id,
-    title: lookbook.title || "J-GO Lookbook",
+    title: lookbook.title || "LookPick Lookbook",
     image: lookbook.image || "",
     tag: lookbook.tag || lookbook.style_tag || "AI LOOKBOOK",
     gender: lookbook.gender || "unisex",
@@ -75,7 +76,7 @@ export async function getHomePageData(): Promise<HomePageData> {
   };
 
   const [productsResult, lookbooksResult, salesResult] = await Promise.allSettled([
-    fetchMergedProducts(),
+    fetchPublishedStoreProducts(),
     fetchLookbookRecords(),
     fetchXanoSalesRankings({ limit: 10, period: "week", revalidate: 60 }),
   ]);
@@ -85,12 +86,16 @@ export async function getHomePageData(): Promise<HomePageData> {
   const rawLookbooks =
     lookbooksResult.status === "fulfilled" ? lookbooksResult.value : [];
 
-  const initialProducts = rawProducts.length > 0 ? formatXanoProducts(rawProducts) : [];
+  const initialProducts =
+    rawProducts.length > 0 ? filterPublishedProducts(formatXanoProducts(rawProducts)) : [];
   const initialLookbooks = rawLookbooks.length > 0 ? formatLookbookList(rawLookbooks) : [];
 
   const initialRankings: InitialRankings = {
     salesRankings: salesResult.status === "fulfilled" ? salesResult.value : [],
-    favoriteProductRankings: sortRecordsByFavoriteCount(rawProducts, 10).map(normalizeProductRankingItem),
+    favoriteProductRankings: sortRecordsByFavoriteCount(
+      filterPublishedProducts(rawProducts),
+      10
+    ).map(normalizeProductRankingItem),
     favoriteLookbookRankings: sortRecordsByFavoriteCount(rawLookbooks, 10).map(normalizeLookbookRankingItem),
   };
 

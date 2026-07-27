@@ -3,6 +3,7 @@ import {
   mergeVariantsIntoProducts,
 } from "@/lib/products/merge-product-variants";
 import { withProductSourceFields } from "@/lib/products/product-source-fields";
+import { filterPublishedProducts } from "@/lib/products/store-product-visibility";
 import { toRecordArray } from "@/lib/rankings/ranking-response";
 import {
   fetchRevalidatedJson,
@@ -68,4 +69,9 @@ export async function fetchMergedProducts(): Promise<Record<string, unknown>[]> 
   return mergeVariantsIntoProducts(products, variantRecords).map((product) =>
     withProductSourceFields(product as Record<string, unknown>)
   );
+}
+
+export async function fetchPublishedStoreProducts(): Promise<Record<string, unknown>[]> {
+  const mergedProducts = await fetchMergedProducts();
+  return filterPublishedProducts(mergedProducts);
 }

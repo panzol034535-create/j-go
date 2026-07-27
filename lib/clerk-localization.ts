@@ -2,7 +2,7 @@ export const clerkLocalization = {
   locale: "zh-TW",
   signIn: {
     start: {
-      title: "登入 J-GO",
+      title: "登入 LookPick",
       subtitle: "登入後即可查看收藏、訂單與購物車",
       actionText: "還沒有帳號？",
       actionLink: "立即註冊",
@@ -10,7 +10,7 @@ export const clerkLocalization = {
   },
   signUp: {
     start: {
-      title: "註冊 J-GO",
+      title: "註冊 LookPick",
       subtitle: "建立帳號後即可收藏商品、查看訂單與結帳",
       actionText: "已經有帳號？",
       actionLink: "立即登入",

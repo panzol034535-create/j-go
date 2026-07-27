@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "J-GO ZOZO Importer",
-  "version": "1.0.0",
+  "version": "1.2.1",
   "description": "Import and sync ZOZOTOWN product stock into J-GO",
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://zozo.jp/*",
     "https://*.zozo.jp/*",
@@ -25,6 +25,15 @@
       ],
       "js": ["dist/content.js"],
       "css": ["dist/content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost:3000/admin/stock-monitor*",
+        "https://j-go-xd5a.vercel.app/admin/stock-monitor*",
+        "https://*.vercel.app/admin/stock-monitor*"
+      ],
+      "js": ["dist/admin-bridge.js"],
       "run_at": "document_idle"
     }
   ],

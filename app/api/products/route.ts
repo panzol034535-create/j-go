@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { fetchMergedProducts } from "@/lib/server/fetch-products";
+import { filterPublishedProducts } from "@/lib/products/store-product-visibility";
+import { fetchPublishedStoreProducts } from "@/lib/server/fetch-products";
 import { xanoErrorResponse } from "@/lib/server/fetch-revalidated";
 
 export const revalidate = 60;
 
 export async function GET() {
   try {
-    const mergedProducts = await fetchMergedProducts();
+    const mergedProducts = filterPublishedProducts(await fetchPublishedStoreProducts());
 
     return NextResponse.json({
       products: mergedProducts,

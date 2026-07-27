@@ -1,6 +1,8 @@
+import { LOOKPICK_BRAND } from "@/lib/brand";
+
 export const clerkAppearance = {
   layout: {
-    logoImageUrl: "/images/jgo-logo.svg",
+    logoImageUrl: LOOKPICK_BRAND.headerLogoSrc,
     logoLinkUrl: "/",
     socialButtonsPlacement: "top",
     socialButtonsVariant: "blockButton",
@@ -81,6 +83,16 @@ export const clerkAppearance = {
     alternativeMethodsBlockButton: {
       borderRadius: "20px",
       border: "1px solid #e5e5e5",
+    },
+    logoBox: {
+      height: "auto",
+      justifyContent: "center",
+    },
+    logoImage: {
+      maxHeight: "56px",
+      height: "auto",
+      width: "auto",
+      objectFit: "contain",
     },
   },
 };

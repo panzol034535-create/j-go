@@ -2,6 +2,7 @@ export { acceptZozoDisplayImageUrl } from "../../lib/products/zozo-image-url";
 
 import type { ScrapeResult, VariantStock } from "./types";
 import { isValidZozoColorName, normalizeStoredColor } from "../../lib/products/color-normalize";
+import { normalizeSize } from "../../lib/products/variant-stock-normalize";
 import {
   acceptZozoDisplayImageUrl,
   filterZozoDisplayImageUrls,
@@ -229,14 +230,6 @@ function pickFieldValue(record: Record<string, unknown>, keys: readonly string[]
   }
 
   return "";
-}
-
-function normalizeSize(size: string): string {
-  const upper = size.toUpperCase();
-  if (upper === "F") {
-    return "FREE";
-  }
-  return size;
 }
 
 function isExcludedKeyword(value: string, keywords: string[]): boolean {
@@ -2189,6 +2182,412 @@ export function extractSyncModeVariantStock(): CurrentColorVariantStockResult {
 
 export function extractCurrentColorVariantStock(): CurrentColorVariantStockResult {
   return extractSyncModeVariantStock();
+}
+
+export type BulkSyncSourceStatus =
+  | "available"
+  | "source_missing"
+  | "discontinued"
+  | "all_out_of_stock"
+  | "sync_uncertain"
+  | "needs_manual_review";
+
+export type BulkSyncScrapeDebug = {
+  pageTitle: string;
+  url: string;
+  stockRootFound: boolean;
+  variantRowCount: number;
+  bodyTextSample: string;
+  variantStockSample?: VariantStock[];
+  sourceStatus?: string;
+  waitedMs?: number;
+};
+
+export type ZozoBulkSyncWaitResult = {
+  ready: boolean;
+  timedOut: boolean;
+  accessDenied: boolean;
+  waitedMs: number;
+};
+
+const ZOZO_BULK_SYNC_READY_TEXT_MARKERS = [
+  "カートに入れる",
+  "予約する",
+  "在庫あり",
+  "在庫なし",
+];
+
+const ZOZO_BULK_SYNC_READY_SELECTORS = [
+  "#goodsDetail",
+  ".goods-detail",
+  '[class*="variation"]',
+  '[class*="Variation"]',
+  '[data-testid*="variation"]',
+  '[class*="goodsDetail"]',
+  '[class*="GoodsDetail"]',
+];
+
+const SOURCE_MISSING_MARKERS = [
+  "商品ページが見つかりません",
+  "お探しのページは見つかりません",
+  "ページが見つかりません",
+];
+
+const DISCONTINUED_MARKERS = [
+  "販売終了",
+  "この商品は現在販売しておりません",
+  "取り扱いが終了",
+  "この商品の取扱いは終了",
+];
+
+const ACCESS_DENIED_MARKERS = [
+  "Access Denied",
+  "You don't have permission",
+  "errors.edgesuite.net",
+];
+
+function pageTextIncludesAny(markers: string[]): boolean {
+  const haystack = `${document.title}\n${document.body?.innerText || ""}`.toLowerCase();
+  return markers.some((marker) => haystack.includes(marker.toLowerCase()));
+}
+
+export function isZozoAccessDeniedPage(): boolean {
+  return pageTextIncludesAny(ACCESS_DENIED_MARKERS);
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function waitForDocumentComplete(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (document.readyState === "complete") {
+      resolve();
+      return;
+    }
+
+    const finish = () => {
+      window.removeEventListener("load", finish);
+      resolve();
+    };
+
+    window.addEventListener("load", finish, { once: true });
+    window.setTimeout(finish, timeoutMs);
+  });
+}
+
+function hasZozoSizeOrSpecBlock(): boolean {
+  const text = document.body?.innerText || "";
+  if (!text.includes("サイズ")) {
+    return false;
+  }
+
+  return (
+    text.includes("着丈") ||
+    text.includes("身幅") ||
+    text.includes("サイズ表") ||
+    Boolean(document.querySelector("table"))
+  );
+}
+
+function hasZozoBulkSyncReadySignal(): boolean {
+  if (pageTextIncludesAny(SOURCE_MISSING_MARKERS)) {
+    return true;
+  }
+
+  if (pageTextIncludesAny(DISCONTINUED_MARKERS)) {
+    return true;
+  }
+
+  const text = document.body?.innerText || "";
+  if (ZOZO_BULK_SYNC_READY_TEXT_MARKERS.some((marker) => text.includes(marker))) {
+    return true;
+  }
+
+  if (hasZozoSizeOrSpecBlock()) {
+    return true;
+  }
+
+  if (collectColorStockBlockElements().length > 0) {
+    return true;
+  }
+
+  return ZOZO_BULK_SYNC_READY_SELECTORS.some((selector) => Boolean(document.querySelector(selector)));
+}
+
+async function waitForZozoVariantStockReady(maxWaitMs: number): Promise<void> {
+  if (maxWaitMs <= 0) {
+    return;
+  }
+
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < maxWaitMs) {
+    const inspect = inspectZozoStockRoot();
+    if (inspect.variantRowCount > 0) {
+      return;
+    }
+
+    if (collectColorStockBlockElements().length > 0) {
+      const variants = extractZozoColorSizeStockFromPage();
+      if (variants.length > 0) {
+        return;
+      }
+    }
+
+    const text = document.body?.innerText || "";
+    if (text.includes("在庫あり") || text.includes("在庫なし")) {
+      const variants = extractZozoColorSizeStockFromPage();
+      if (variants.length > 0) {
+        return;
+      }
+    }
+
+    await sleepMs(250);
+  }
+}
+
+export async function waitForZozoBulkSyncPageReady(options?: {
+  maxWaitMs?: number;
+  extraDelayMinMs?: number;
+  extraDelayMaxMs?: number;
+}): Promise<ZozoBulkSyncWaitResult> {
+  const maxWaitMs = options?.maxWaitMs ?? 30_000;
+  const extraDelayMinMs = options?.extraDelayMinMs ?? 2_000;
+  const extraDelayMaxMs = options?.extraDelayMaxMs ?? 4_000;
+  const startedAt = Date.now();
+
+  await waitForDocumentComplete(maxWaitMs);
+
+  while (Date.now() - startedAt < maxWaitMs) {
+    if (isZozoAccessDeniedPage()) {
+      return {
+        ready: false,
+        timedOut: false,
+        accessDenied: true,
+        waitedMs: Date.now() - startedAt,
+      };
+    }
+
+    if (hasZozoBulkSyncReadySignal()) {
+      const extraDelay =
+        extraDelayMinMs +
+        Math.floor(Math.random() * Math.max(1, extraDelayMaxMs - extraDelayMinMs + 1));
+      const remaining = maxWaitMs - (Date.now() - startedAt);
+      if (remaining > 0) {
+        await sleepMs(Math.min(extraDelay, remaining));
+      }
+
+      const remainingForStock = maxWaitMs - (Date.now() - startedAt);
+      if (remainingForStock > 0) {
+        await waitForZozoVariantStockReady(remainingForStock);
+      }
+
+      return {
+        ready: true,
+        timedOut: false,
+        accessDenied: false,
+        waitedMs: Date.now() - startedAt,
+      };
+    }
+
+    await sleepMs(250);
+  }
+
+  if (isZozoAccessDeniedPage()) {
+    return {
+      ready: false,
+      timedOut: false,
+      accessDenied: true,
+      waitedMs: Date.now() - startedAt,
+    };
+  }
+
+  return {
+    ready: false,
+    timedOut: true,
+    accessDenied: false,
+    waitedMs: Date.now() - startedAt,
+  };
+}
+
+export function inspectZozoStockRoot(): {
+  stockRootFound: boolean;
+  variantRowCount: number;
+  stockBlockElement: HTMLElement | null;
+  variants: VariantStock[];
+} {
+  const block = findBestColorStockBlock();
+  const stockRootFound =
+    block.element !== null ||
+    collectColorStockBlockElements().length > 0 ||
+    ((document.body?.innerText || "").includes("在庫あり") ||
+      (document.body?.innerText || "").includes("在庫なし"));
+
+  return {
+    stockRootFound,
+    variantRowCount: block.variants.length,
+    stockBlockElement: block.element,
+    variants: block.variants,
+  };
+}
+
+function buildBulkSyncScrapeDebug(options: {
+  stockRootFound: boolean;
+  variantRowCount: number;
+  variantStockSample?: VariantStock[];
+  sourceStatus?: string;
+  waitedMs?: number;
+}): BulkSyncScrapeDebug {
+  return {
+    pageTitle: document.title,
+    url: location.href,
+    stockRootFound: options.stockRootFound,
+    variantRowCount: options.variantRowCount,
+    bodyTextSample: (document.body?.innerText || "").slice(0, 300),
+    variantStockSample: options.variantStockSample,
+    sourceStatus: options.sourceStatus,
+    waitedMs: options.waitedMs,
+  };
+}
+
+function logBulkSyncScrapeDebug(debug: BulkSyncScrapeDebug): void {
+  console.log("ZOZO SYNC PAGE URL", debug.url);
+  console.log("ZOZO SYNC TITLE", debug.pageTitle);
+  console.log("ZOZO SYNC STOCK ROOT FOUND", debug.stockRootFound);
+  console.log("ZOZO SYNC VARIANT ROW COUNT", debug.variantRowCount);
+  console.log("ZOZO SYNC VARIANT STOCK SAMPLE", debug.variantStockSample ?? []);
+  console.log("ZOZO SYNC SOURCE STATUS", debug.sourceStatus ?? "unknown");
+}
+
+export function extractBulkSyncPageResult(options?: {
+  waitedMs?: number;
+}): {
+  source_status: BulkSyncSourceStatus;
+  variant_stock: VariantStock[];
+  current_jpy_price?: number;
+  reason?: string;
+  message?: string;
+  debug: BulkSyncScrapeDebug;
+} {
+  if (isZozoAccessDeniedPage()) {
+    const debug = buildBulkSyncScrapeDebug({
+      stockRootFound: false,
+      variantRowCount: 0,
+      sourceStatus: "access_denied",
+      waitedMs: options?.waitedMs,
+    });
+    logBulkSyncScrapeDebug(debug);
+    return {
+      source_status: "needs_manual_review",
+      variant_stock: [],
+      reason: "access_denied",
+      debug,
+    };
+  }
+
+  if (pageTextIncludesAny(SOURCE_MISSING_MARKERS)) {
+    const debug = buildBulkSyncScrapeDebug({
+      stockRootFound: false,
+      variantRowCount: 0,
+      sourceStatus: "source_missing",
+      waitedMs: options?.waitedMs,
+    });
+    logBulkSyncScrapeDebug(debug);
+    return {
+      source_status: "source_missing",
+      variant_stock: [],
+      reason: "source_missing",
+      debug,
+    };
+  }
+
+  if (pageTextIncludesAny(DISCONTINUED_MARKERS)) {
+    const debug = buildBulkSyncScrapeDebug({
+      stockRootFound: false,
+      variantRowCount: 0,
+      sourceStatus: "discontinued",
+      waitedMs: options?.waitedMs,
+    });
+    logBulkSyncScrapeDebug(debug);
+    return {
+      source_status: "discontinued",
+      variant_stock: [],
+      reason: "discontinued",
+      debug,
+    };
+  }
+
+  const stockInspect = inspectZozoStockRoot();
+  const syncResult = extractSyncModeVariantStock();
+  const variant_stock = syncResult.variant_stock;
+
+  if (variant_stock.length === 0) {
+    if (!stockInspect.stockRootFound) {
+      const debug = buildBulkSyncScrapeDebug({
+        stockRootFound: false,
+        variantRowCount: 0,
+        sourceStatus: "scrape_empty_variants",
+        waitedMs: options?.waitedMs,
+      });
+      logBulkSyncScrapeDebug(debug);
+      return {
+        source_status: "needs_manual_review",
+        variant_stock: [],
+        reason: "scrape_empty_variants",
+        message: "找不到 ZOZO 庫存區塊",
+        debug,
+      };
+    }
+
+    const debug = buildBulkSyncScrapeDebug({
+      stockRootFound: true,
+      variantRowCount: 0,
+      sourceStatus: "sync_uncertain",
+      waitedMs: options?.waitedMs,
+    });
+    logBulkSyncScrapeDebug(debug);
+    return {
+      source_status: "sync_uncertain",
+      variant_stock: [],
+      reason: "scrape_empty_variants",
+      debug,
+    };
+  }
+
+  const hasPurchasable = variant_stock.some((entry) => entry.stock_status === "in_stock");
+  const sourceStatus: BulkSyncSourceStatus = hasPurchasable ? "available" : "all_out_of_stock";
+  const debug = buildBulkSyncScrapeDebug({
+    stockRootFound: stockInspect.stockRootFound,
+    variantRowCount: variant_stock.length,
+    variantStockSample: variant_stock.slice(0, 5),
+    sourceStatus,
+    waitedMs: options?.waitedMs,
+  });
+  logBulkSyncScrapeDebug(debug);
+
+  if (!hasPurchasable) {
+    return {
+      source_status: "all_out_of_stock",
+      variant_stock,
+      ...(syncResult.current_jpy_price && syncResult.current_jpy_price > 0
+        ? { current_jpy_price: syncResult.current_jpy_price }
+        : {}),
+      reason: "all_out_of_stock",
+      debug,
+    };
+  }
+
+  return {
+    source_status: "available",
+    variant_stock,
+    ...(syncResult.current_jpy_price && syncResult.current_jpy_price > 0
+      ? { current_jpy_price: syncResult.current_jpy_price }
+      : {}),
+    debug,
+  };
 }
 
 function getHtmlRowCells(row: HTMLTableRowElement): string[] {

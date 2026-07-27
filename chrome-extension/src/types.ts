@@ -45,14 +45,41 @@ export type ScrapeResult = Omit<ImportProductPayload, "source_url" | "source_sit
 export type ImportProductResponse = {
   success?: boolean;
   error?: string;
+  message?: string;
+  productId?: number;
+  failedVariants?: Array<{
+    color: string;
+    size: string;
+    stock_status: string;
+    stock_qty: number;
+    reason: string;
+    status: number;
+    responseText: string;
+  }>;
   product?: {
     id: number;
     name_zh?: string;
   };
 };
 
+export type ExtensionBulkSyncProduct = {
+  id: number;
+  name: string;
+  source_url: string;
+};
+
+export type ExtensionSourceStatus =
+  | "available"
+  | "source_missing"
+  | "discontinued"
+  | "all_out_of_stock"
+  | "sync_uncertain"
+  | "needs_manual_review";
+
 export type SyncProductStockPayload = {
   product_id: number;
+  product_name?: string;
+  source_status?: ExtensionSourceStatus;
   variant_stock: VariantStock[];
   /** ZOZO 頁面 JSON-LD / 購買區塊解析出的日幣售價；僅 > 0 時才應送出。 */
   current_jpy_price?: number;
@@ -61,6 +88,7 @@ export type SyncProductStockPayload = {
 export type SyncProductStockResponse = {
   success?: boolean;
   error?: string;
+  action?: string;
   synced_count?: number;
   message?: string;
   price_synced?: boolean;
@@ -72,12 +100,41 @@ export type SyncProductStockResponse = {
 export type BackgroundMessage =
   | { type: "IMPORT_PRODUCT"; payload: ImportProductPayload }
   | { type: "SYNC_PRODUCT_STOCK"; payload: SyncProductStockPayload }
-  | { type: "GET_API_BASE_URL" };
+  | { type: "GET_API_BASE_URL" }
+  | {
+      type: "ADMIN_BRIDGE";
+      adminType: string;
+      products?: ExtensionBulkSyncProduct[];
+    }
+  | {
+      type: "BULK_SYNC_SCRAPE_RESULT";
+      product_id: number;
+      payload: {
+        product_id: number;
+        product_name?: string;
+        source_status?: ExtensionSourceStatus;
+        access_denied?: boolean;
+        variant_stock?: VariantStock[];
+        current_jpy_price?: number;
+        reason?: string;
+        message?: string;
+        debug?: {
+          pageTitle?: string;
+          url?: string;
+          stockRootFound?: boolean;
+          variantRowCount?: number;
+          bodyTextSample?: string;
+          variantStockSample?: VariantStock[];
+          sourceStatus?: string;
+          waitedMs?: number;
+        };
+      };
+    };
 
 export type BackgroundResponse =
   | { ok: true; data: ImportProductResponse }
   | { ok: true; data: SyncProductStockResponse }
-  | { ok: false; error: string }
+  | { ok: false; error: string; failedVariants?: ImportProductResponse["failedVariants"] }
   | { ok: true; apiBaseUrl: string };
 
 export const DEFAULT_API_BASE_URL = "http://localhost:3000";

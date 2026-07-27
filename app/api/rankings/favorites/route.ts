@@ -3,6 +3,7 @@ import {
   sortRecordsByFavoriteCount,
   toRecordArray,
 } from "@/lib/rankings/ranking-response";
+import { filterPublishedProducts } from "@/lib/products/store-product-visibility";
 import { fetchRevalidatedJson } from "@/lib/server/fetch-revalidated";
 
 const DEFAULT_PRODUCTS_URL =
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const data = await fetchRevalidatedJson(productsUrl);
-    const products = toRecordArray(data);
+    const products = filterPublishedProducts(toRecordArray(data));
     const items = sortRecordsByFavoriteCount(products, limit).map(normalizeProductRankingItem);
 
     return NextResponse.json({

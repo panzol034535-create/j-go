@@ -1,10 +1,14 @@
 import {
+  extractBulkSyncPageResult,
   extractSyncModeVariantStock,
+  isZozoAccessDeniedPage,
   isZozoProductPage,
   scrapeZozoProductPage,
+  waitForZozoBulkSyncPageReady,
 } from "./scrape-zozo-page";
 import { detectSourceSite } from "./detect-source-site";
 import type { BackgroundMessage, BackgroundResponse } from "./types";
+import { resolveImportErrorMessage } from "./variant-create-errors";
 
 const IMPORT_BUTTON_ID = "jgo-import-button";
 const SYNC_BUTTON_ID = "jgo-sync-button";
@@ -33,9 +37,18 @@ function showToast(message: string, type: "success" | "error" | "loading") {
   }
 }
 
-function sendBackgroundMessage(message: BackgroundMessage): Promise<BackgroundResponse> {
+function sendBackgroundMessage(
+  message: BackgroundMessage,
+  timeoutMs = 15_000
+): Promise<BackgroundResponse> {
   return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error("background_message_timeout"));
+    }, timeoutMs);
+
     chrome.runtime.sendMessage(message, (response: BackgroundResponse | undefined) => {
+      window.clearTimeout(timeoutId);
+
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
@@ -189,7 +202,13 @@ async function handleImportClick(button: HTMLButtonElement) {
     });
 
     if (!response.ok) {
-      showToast(response.error || "匯入失敗", "error");
+      showToast(
+        resolveImportErrorMessage({
+          error: response.error,
+          failedVariants: response.failedVariants,
+        }),
+        "error"
+      );
       return;
     }
 
@@ -203,7 +222,7 @@ async function handleImportClick(button: HTMLButtonElement) {
 }
 
 function mountImportButton() {
-  if (!isZozoProductPage() || isSyncMode() || document.getElementById(IMPORT_BUTTON_ID)) {
+  if (!isZozoProductPage() || isSyncMode() || isBulkSyncMode() || document.getElementById(IMPORT_BUTTON_ID)) {
     return;
   }
 
@@ -241,8 +260,157 @@ function mountSyncButton(productId: number) {
   };
 }
 
+function parseBulkSyncProductId(): number | null {
+  const hashMatch = window.location.hash.match(/jgo-bulk-sync=(\d+)/);
+  if (hashMatch) {
+    return Number(hashMatch[1]);
+  }
+
+  return null;
+}
+
+function isBulkSyncMode(): boolean {
+  return parseBulkSyncProductId() !== null;
+}
+
+async function sendBulkSyncScrapeResult(
+  productId: number,
+  payload: Extract<BackgroundMessage, { type: "BULK_SYNC_SCRAPE_RESULT" }>["payload"]
+): Promise<void> {
+  try {
+    await sendBackgroundMessage({
+      type: "BULK_SYNC_SCRAPE_RESULT",
+      product_id: productId,
+      payload,
+    });
+  } catch (error) {
+    console.error("BULK SYNC SCRAPE RESULT SEND FAILED", productId, error);
+  }
+}
+
+function buildBulkSyncTimeoutDebug(waitedMs: number) {
+  return {
+    pageTitle: document.title,
+    url: location.href,
+    stockRootFound: false,
+    variantRowCount: 0,
+    bodyTextSample: (document.body?.innerText || "").slice(0, 300),
+    sourceStatus: "source_timeout",
+    waitedMs,
+  };
+}
+
+async function runBulkSyncScrape(productId: number) {
+  console.log("JGO EXT SYNC ITEM START", productId, document.title, location.href);
+
+  try {
+    const waitResult = await waitForZozoBulkSyncPageReady({
+      maxWaitMs: 30_000,
+      extraDelayMinMs: 2_000,
+      extraDelayMaxMs: 4_000,
+    });
+
+    if (waitResult.accessDenied || isZozoAccessDeniedPage()) {
+      console.log("JGO EXT ACCESS DENIED", productId, location.href);
+      const debug = buildBulkSyncTimeoutDebug(waitResult.waitedMs);
+      debug.sourceStatus = "access_denied";
+      console.log("ZOZO SYNC PAGE URL", debug.url);
+      console.log("ZOZO SYNC TITLE", debug.pageTitle);
+      console.log("ZOZO SYNC STOCK ROOT FOUND", debug.stockRootFound);
+      console.log("ZOZO SYNC VARIANT ROW COUNT", debug.variantRowCount);
+      console.log("ZOZO SYNC VARIANT STOCK SAMPLE", []);
+      console.log("ZOZO SYNC SOURCE STATUS", debug.sourceStatus);
+
+      await sendBulkSyncScrapeResult(productId, {
+        product_id: productId,
+        product_name: document.title || `商品 #${productId}`,
+        access_denied: true,
+        source_status: "needs_manual_review",
+        reason: "access_denied",
+        debug,
+      });
+      return;
+    }
+
+    if (waitResult.timedOut) {
+      const debug = buildBulkSyncTimeoutDebug(waitResult.waitedMs);
+      console.log("ZOZO SYNC PAGE URL", debug.url);
+      console.log("ZOZO SYNC TITLE", debug.pageTitle);
+      console.log("ZOZO SYNC STOCK ROOT FOUND", debug.stockRootFound);
+      console.log("ZOZO SYNC VARIANT ROW COUNT", debug.variantRowCount);
+      console.log("ZOZO SYNC VARIANT STOCK SAMPLE", []);
+      console.log("ZOZO SYNC SOURCE STATUS", debug.sourceStatus);
+
+      await sendBulkSyncScrapeResult(productId, {
+        product_id: productId,
+        product_name: document.title || `商品 #${productId}`,
+        source_status: "needs_manual_review",
+        reason: "source_timeout",
+        debug,
+      });
+      return;
+    }
+
+    const result = extractBulkSyncPageResult({ waitedMs: waitResult.waitedMs });
+
+    if (result.reason === "access_denied") {
+      console.log("JGO EXT ACCESS DENIED", productId, location.href);
+      await sendBulkSyncScrapeResult(productId, {
+        product_id: productId,
+        product_name: document.title || `商品 #${productId}`,
+        access_denied: true,
+        source_status: result.source_status,
+        reason: "access_denied",
+        debug: result.debug,
+      });
+      return;
+    }
+
+    const variantStock = result.variant_stock || [];
+
+    console.log("JGO EXT VARIANT STOCK", {
+      product_id: productId,
+      variants: variantStock.map((variant) => ({
+        color: variant.color,
+        size: variant.size,
+        stock_status: variant.stock_status,
+      })),
+    });
+
+    await sendBulkSyncScrapeResult(productId, {
+      product_id: productId,
+      product_name: document.title || `商品 #${productId}`,
+      source_status: result.source_status,
+      variant_stock: result.variant_stock,
+      ...(result.current_jpy_price && result.current_jpy_price > 0
+        ? { current_jpy_price: result.current_jpy_price }
+        : {}),
+      reason: result.reason,
+      message: result.message,
+      debug: result.debug,
+    });
+  } catch (error) {
+    console.error("BULK SYNC SCRAPE FAILED", productId, error);
+    const debug = buildBulkSyncTimeoutDebug(0);
+    debug.sourceStatus = "unexpected_exception";
+    await sendBulkSyncScrapeResult(productId, {
+      product_id: productId,
+      product_name: document.title || `商品 #${productId}`,
+      source_status: "needs_manual_review",
+      reason: error instanceof Error ? error.message : String(error),
+      debug,
+    });
+  }
+}
+
 function init() {
   console.log("J-GO ZOZO PRODUCT PAGE", location.pathname);
+
+  const bulkSyncProductId = parseBulkSyncProductId();
+  if (bulkSyncProductId) {
+    void runBulkSyncScrape(bulkSyncProductId);
+    return;
+  }
 
   const syncProductId = parseSyncProductId();
 

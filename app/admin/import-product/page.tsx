@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { detectSourceSite } from "@/lib/products/source-site";
 import type { ImportedProduct, ZozoProductData } from "@/lib/types/product-import";
+import { formatFailedVariantsMessage, type FailedVariantDetail } from "@/lib/import-product/variant-create-errors";
 
 type ImportStatus = "idle" | "loading" | "success" | "error";
 
@@ -150,7 +151,14 @@ export default function ImportProductPage() {
 
       if (!response.ok) {
         setStatus("error");
-        setMessage(data.error || "匯入失敗");
+        const failedVariants = Array.isArray(data.failedVariants)
+          ? (data.failedVariants as FailedVariantDetail[])
+          : [];
+        setMessage(
+          failedVariants.length > 0
+            ? formatFailedVariantsMessage(failedVariants)
+            : data.error || "匯入失敗"
+        );
         return;
       }
 

@@ -1,5 +1,6 @@
 import { formatLookbookList, type FormattedLookbook } from "@/lib/lookbooks/format-lookbook-list";
 import { formatXanoProducts, type FormattedXanoProduct } from "@/lib/products/format-xano-product";
+import { isPublishedProduct, filterPublishedProducts } from "@/lib/products/store-product-visibility";
 import {
   buildAiRecommendRankingContext,
   rankLookbooksForRecommend,
@@ -7,7 +8,7 @@ import {
   type AiRecommendRankingContext,
 } from "@/lib/server/ai-recommend-ranking";
 import { fetchLookbookRecords } from "@/lib/server/home-data";
-import { fetchMergedProducts } from "@/lib/server/fetch-products";
+import { fetchPublishedStoreProducts } from "@/lib/server/fetch-products";
 
 export const MAX_TEXT_CATALOG_PRODUCTS = 16;
 export const MAX_TEXT_CATALOG_LOOKBOOKS = 8;
@@ -77,8 +78,7 @@ export function isRecommendableRawProduct(raw: Record<string, unknown>): boolean
     return false;
   }
 
-  const status = String(raw.status ?? "").trim().toLowerCase();
-  if (status && status !== "published") {
+  if (!isPublishedProduct(raw)) {
     return false;
   }
 
@@ -136,7 +136,7 @@ export async function loadAiRecommendCatalog(
 ): Promise<AiRecommendCatalog> {
   const rankingContext = buildAiRecommendRankingContext(options);
   const [productsResult, lookbooksResult] = await Promise.allSettled([
-    fetchMergedProducts(),
+    fetchPublishedStoreProducts(),
     fetchLookbookRecords(),
   ]);
 
@@ -147,7 +147,9 @@ export async function loadAiRecommendCatalog(
   const rawLookbooks = lookbooksResult.status === "fulfilled" ? lookbooksResult.value : [];
 
   const filteredRawProducts = rawProducts.filter(isRecommendableRawProduct);
-  const formattedProducts = formatXanoProducts(filteredRawProducts).map(compressProduct);
+  const formattedProducts = filterPublishedProducts(
+    formatXanoProducts(filteredRawProducts)
+  ).map(compressProduct);
   const formattedLookbooks = formatLookbookList(rawLookbooks)
     .filter(isRecommendableLookbook)
     .map(compressLookbook);
