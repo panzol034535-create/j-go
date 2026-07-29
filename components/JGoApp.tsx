@@ -192,6 +192,31 @@ function formatPrice(n: number | string | unknown) {
   return `NT$ ${value.toLocaleString("zh-TW")}`;
 }
 
+async function sendOrderNotificationEmail(payload: Record<string, unknown>) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const response = await fetch("/api/order-notification", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      console.warn("訂單通知 Email 寄送失敗", response.status, message);
+    }
+  } catch (error) {
+    console.warn("訂單通知 Email 寄送失敗", error);
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 function formatProductGender(gender: string | undefined) {
   if (gender === "male") return "男生";
   if (gender === "female") return "女生";
@@ -2906,17 +2931,45 @@ export default function JGoApp({
 
       await refreshProductsFromXano({ hasCache: true });
 
+      const orderItems = cart.map((item) => ({
+        id: item.key,
+        product_id: item.id,
+        product_name: item.name || selectedProduct?.name || "JGO商品",
+        name: item.name || selectedProduct?.name || "JGO商品",
+        brand: item.brand,
+        color: item.color,
+        size: item.size,
+        qty: item.qty,
+        unit_price: item.price,
+        subtotal: item.price * item.qty,
+      }));
+
+      await sendOrderNotificationEmail({
+        order_id: orderId,
+        customer_name: checkoutForm.name,
+        customer_email: checkoutForm.email,
+        customer_phone: checkoutForm.phone,
+        clerk_user_id: user?.id ?? currentUser?.id ?? "",
+        delivery_method: delivery,
+        subtotal_price: subtotal,
+        shipping_fee: shipping,
+        coupon_id: appliedCoupon?.coupon_id ?? null,
+        coupon_code: appliedCoupon?.code ?? "",
+        discount_amount: discountAmount,
+        discounted_subtotal: discountedSubtotal,
+        total_price: payableTotal,
+        pickup_store_name: pickupStore.store_name,
+        pickup_store_code: pickupStore.store_id,
+        pickup_store_address: pickupStore.address,
+        home_city: shippingAddress.city,
+        home_district: shippingAddress.district,
+        home_address: shippingAddress.address,
+        items: orderItems,
+      });
+
       const order = {
         id: orderId || `JG-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${String(orders.length + 1).padStart(4, "0")}`,
-        items: cart.map((item) => ({
-          id: item.key,
-          product_name: item.name || selectedProduct?.name || "JGO商品",
-          color: item.color,
-          size: item.size,
-          qty: item.qty,
-          unit_price: item.price,
-          subtotal: item.price * item.qty,
-        })),
+        items: orderItems,
         total: payableTotal,
         delivery,
         pickupStore,
