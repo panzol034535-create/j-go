@@ -72,6 +72,7 @@ type MatchedVariantUpdate = {
   color: string;
   size: string;
   stock_status: string;
+  stock_qty?: number;
 };
 
 function getUpdateVariantStockUrl(): string {
@@ -355,18 +356,48 @@ async function updateVariantStock(
   updateUrl: string,
   update: MatchedVariantUpdate
 ): Promise<{ ok: boolean; body: string }> {
+  const requestBody = {
+    variant_id: update.variant_id,
+    product_id: update.product_id,
+    color: update.color,
+    size: update.size,
+    stock_status: update.stock_status,
+    ...(Number.isFinite(Number(update.stock_qty))
+      ? { stock_qty: Number(update.stock_qty) }
+      : {}),
+  };
+
   const response = await fetch(updateUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      variant_id: update.variant_id,
-      stock_status: update.stock_status,
-    }),
+    body: JSON.stringify(requestBody),
+  });
+
+  const body = await response.text();
+  let parsedBody: unknown = null;
+
+  try {
+    parsedBody = JSON.parse(body);
+  } catch {
+    parsedBody = null;
+  }
+
+  const xanoReturnedExplicitFailure =
+    parsedBody &&
+    typeof parsedBody === "object" &&
+    "success" in parsedBody &&
+    (parsedBody as { success?: unknown }).success === false;
+
+  console.log("JGO SYNC UPDATE VARIANT RESPONSE", {
+    requestBody,
+    status: response.status,
+    ok: response.ok,
+    body,
   });
 
   return {
-    ok: response.ok,
-    body: await response.text(),
+    ok: response.ok && !xanoReturnedExplicitFailure,
+    body,
   };
 }
 
@@ -468,6 +499,7 @@ async function applyVariantAndProductStockUpdate(options: {
       color: update.color,
       size: update.size,
       stock_status: update.stock_status,
+      stock_qty: update.stock_qty,
     });
 
     const result = await updateVariantStock(getUpdateVariantStockUrl(), update);

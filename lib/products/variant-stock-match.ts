@@ -16,6 +16,7 @@ export type MatchedVariantStockUpdate = {
   color: string;
   size: string;
   stock_status: string;
+  stock_qty?: number;
 };
 
 function canonicalSize(size: string): string {
@@ -152,6 +153,9 @@ export function matchVariantStockForUpdate(options: {
       color: entry.color,
       size: entry.size,
       stock_status: entry.stock_status,
+      ...(Number.isFinite(Number(entry.stock_qty))
+        ? { stock_qty: Number(entry.stock_qty) }
+        : {}),
     });
   }
 

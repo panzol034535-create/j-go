@@ -2,6 +2,7 @@ export type VariantStockEntry = {
   color: string;
   size: string;
   stock_status: string;
+  stock_qty?: number;
 };
 
 import { isValidProductColor, normalizeColor, normalizeStoredColor } from "@/lib/products/color-normalize";
@@ -55,6 +56,9 @@ export function normalizeVariantStockEntries(
       color: normalizeStoredColor(String(entry.color || "")),
       size: normalizeSize(String(entry.size || "")),
       stock_status: normalizeStockStatus(entry.stock_status),
+      ...(Number.isFinite(Number(entry.stock_qty))
+        ? { stock_qty: Number(entry.stock_qty) }
+        : {}),
     }))
     .filter((entry) => entry.color && entry.size);
 }

@@ -111,10 +111,10 @@ const STOCK_TEXT_FIELD_KEYS = [
 ] as const;
 
 const SIZE_STOCK_TEXT_PATTERN =
-  /\b(XS|S|M|L|XL|XXL|FREE|F|X-SMALL|SMALL|MEDIUM|LARGE|X-LARGE)\s*\/\s*(在庫あり|在庫なし|残り\d*点?|売り切れ|完売)/gi;
+  /\b(XS|S|M|L|XL|XXL|FREE|F|X-SMALL|SMALL|MEDIUM|LARGE|X-LARGE)\s*\/\s*(在庫あり|在庫なし|残り\d*点?|売り切れ|完売|販売終了|入荷待ち|予約可能|予約商品|予約する|カートに入れる)/gi;
 
 const CURRENT_SIZE_STOCK_TEXT_PATTERN =
-  /(XXL|XL|XS|FREE|SMALL|MEDIUM|LARGE|S|M|L)\s*[\/／]\s*(在庫あり|在庫なし|残り\d+点|売り切れ|完売)/gi;
+  /(XXL|XL|XS|FREE|SMALL|MEDIUM|LARGE|S|M|L)\s*[\/／]\s*(在庫あり|在庫なし|残り\d+点|残り\d*点?|売り切れ|完売|販売終了|入荷待ち|予約可能|予約商品|予約する|カートに入れる)/gi;
 
 function decodeHtmlEntities(text: string): string {
   const textarea = document.createElement("textarea");
@@ -570,11 +570,11 @@ function parseStockStatusFromText(text: string): "in_stock" | "out_of_stock" | n
     return null;
   }
 
-  if (/在庫なし|売り切れ|完売/.test(normalized)) {
+  if (/在庫なし|売り切れ|完売|販売終了|入荷待ち/.test(normalized)) {
     return "out_of_stock";
   }
 
-  if (/在庫あり|残り/.test(normalized)) {
+  if (/在庫あり|残り|予約可能|予約商品|予約する|カートに入れる/.test(normalized)) {
     return "in_stock";
   }
 
@@ -2058,7 +2058,13 @@ function collectColorStockBlockElements(): HTMLElement[] {
       }
 
       const text = element.innerText || "";
-      if (!text.includes("在庫あり") && !text.includes("在庫なし")) {
+      if (
+        !text.includes("在庫あり") &&
+        !text.includes("在庫なし") &&
+        !text.includes("予約可能") &&
+        !text.includes("予約する") &&
+        !text.includes("カートに入れる")
+      ) {
         return false;
       }
 
@@ -2081,7 +2087,14 @@ function findBestColorStockBlock(): {
     }
 
     const text = element.innerText?.trim() || "";
-    if (!text || (!text.includes("在庫あり") && !text.includes("在庫なし"))) {
+    if (
+      !text ||
+      (!text.includes("在庫あり") &&
+        !text.includes("在庫なし") &&
+        !text.includes("予約可能") &&
+        !text.includes("予約する") &&
+        !text.includes("カートに入れる"))
+    ) {
       continue;
     }
 
@@ -2213,6 +2226,7 @@ export type ZozoBulkSyncWaitResult = {
 const ZOZO_BULK_SYNC_READY_TEXT_MARKERS = [
   "カートに入れる",
   "予約する",
+  "予約可能",
   "在庫あり",
   "在庫なし",
 ];
@@ -2228,16 +2242,32 @@ const ZOZO_BULK_SYNC_READY_SELECTORS = [
 ];
 
 const SOURCE_MISSING_MARKERS = [
-  "商品ページが見つかりません",
-  "お探しのページは見つかりません",
-  "ページが見つかりません",
+  "\u5546\u54c1\u30da\u30fc\u30b8\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093",
+  "\u304a\u63a2\u3057\u306e\u30da\u30fc\u30b8\u306f\u898b\u3064\u304b\u308a\u307e\u305b\u3093",
+  "\u30da\u30fc\u30b8\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093",
+  "\u6307\u5b9a\u3055\u308c\u305fURL\u306f\u5b58\u5728\u3057\u307e\u305b\u3093",
+  "\u3053\u306e\u30da\u30fc\u30b8\u306f\u5b58\u5728\u3057\u307e\u305b\u3093",
+  "\u5546\u54c1\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093",
+  "\u5b58\u5728\u3057\u306a\u3044\u5546\u54c1",
+  "URL\u304c\u6b63\u3057\u304f\u3042\u308a\u307e\u305b\u3093",
+  "not found",
+  "404 not found",
+  "404 error",
 ];
 
 const DISCONTINUED_MARKERS = [
-  "販売終了",
-  "この商品は現在販売しておりません",
-  "取り扱いが終了",
-  "この商品の取扱いは終了",
+  "\u8ca9\u58f2\u7d42\u4e86",
+  "\u8ca9\u58f2\u3092\u7d42\u4e86",
+  "\u3053\u306e\u5546\u54c1\u306f\u8ca9\u58f2\u7d42\u4e86\u3057\u307e\u3057\u305f",
+  "\u3053\u306e\u5546\u54c1\u306f\u73fe\u5728\u8ca9\u58f2\u3057\u3066\u304a\u308a\u307e\u305b\u3093",
+  "\u73fe\u5728\u8ca9\u58f2\u3057\u3066\u304a\u308a\u307e\u305b\u3093",
+  "\u53d6\u308a\u6271\u3044\u304c\u7d42\u4e86",
+  "\u53d6\u308a\u6271\u3044\u7d42\u4e86",
+  "\u3053\u306e\u5546\u54c1\u306e\u53d6\u6271\u3044\u306f\u7d42\u4e86",
+  "\u73fe\u5728\u53d6\u308a\u6271\u3063\u3066\u304a\u308a\u307e\u305b\u3093",
+  "\u63b2\u8f09\u7d42\u4e86",
+  "\u63b2\u8f09\u304c\u7d42\u4e86",
+  "\u3053\u306e\u5546\u54c1\u306f\u63b2\u8f09\u304c\u7d42\u4e86\u3057\u307e\u3057\u305f",
 ];
 
 const ACCESS_DENIED_MARKERS = [
@@ -2247,7 +2277,7 @@ const ACCESS_DENIED_MARKERS = [
 ];
 
 function pageTextIncludesAny(markers: string[]): boolean {
-  const haystack = `${document.title}\n${document.body?.innerText || ""}`.toLowerCase();
+  const haystack = `${document.title}\n${window.location.href}\n${document.body?.innerText || ""}`.toLowerCase();
   return markers.some((marker) => haystack.includes(marker.toLowerCase()));
 }
 
@@ -2338,7 +2368,13 @@ async function waitForZozoVariantStockReady(maxWaitMs: number): Promise<void> {
     }
 
     const text = document.body?.innerText || "";
-    if (text.includes("在庫あり") || text.includes("在庫なし")) {
+    if (
+      text.includes("在庫あり") ||
+      text.includes("在庫なし") ||
+      text.includes("予約可能") ||
+      text.includes("予約する") ||
+      text.includes("カートに入れる")
+    ) {
       const variants = extractZozoColorSizeStockFromPage();
       if (variants.length > 0) {
         return;
@@ -2424,7 +2460,10 @@ export function inspectZozoStockRoot(): {
     block.element !== null ||
     collectColorStockBlockElements().length > 0 ||
     ((document.body?.innerText || "").includes("在庫あり") ||
-      (document.body?.innerText || "").includes("在庫なし"));
+      (document.body?.innerText || "").includes("在庫なし") ||
+      (document.body?.innerText || "").includes("予約可能") ||
+      (document.body?.innerText || "").includes("予約する") ||
+      (document.body?.innerText || "").includes("カートに入れる"));
 
   return {
     stockRootFound,
