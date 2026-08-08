@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState, useEffect, useRef, useSyncExternalStore } from "react";
-import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
+import { UserButton, useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles, ChevronDown, Heart, ShieldCheck, Clock, MessageCircle, Send } from "lucide-react";
 import {
@@ -3159,7 +3159,13 @@ export default function JGoApp({
             </button>
             <div className="lookpick-header-actions flex shrink-0 items-center gap-2">
             <button
-              onClick={() => setTab("account")}
+              onClick={() => {
+                if (!isSignedIn) {
+                  window.location.assign("/sign-in");
+                  return;
+                }
+                setTab("account");
+              }}
               className="rounded-full border border-neutral-200 bg-white p-3 text-neutral-700 transition hover:bg-neutral-50 active:scale-[0.98] active:bg-neutral-100"
               aria-label="我的帳號"
             >
@@ -4655,17 +4661,21 @@ export default function JGoApp({
                       <p className="mt-1 text-sm leading-6 text-neutral-500">登入後可以加入購物車、查看訂單與物流資訊。</p>
                     </div>
 
-                    <SignInButton mode="redirect">
-                      <button className="h-12 w-full rounded-2xl bg-neutral-900 text-base font-black text-white">
-                        登入會員
-                      </button>
-                    </SignInButton>
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign("/sign-in")}
+                      className="h-12 w-full rounded-2xl bg-neutral-900 text-base font-black text-white"
+                    >
+                      登入會員
+                    </button>
 
-                    <SignUpButton mode="redirect">
-                      <button className="h-12 w-full rounded-2xl border border-neutral-200 bg-white text-base font-black text-neutral-900">
-                        建立新帳號
-                      </button>
-                    </SignUpButton>
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign("/sign-up")}
+                      className="h-12 w-full rounded-2xl border border-neutral-200 bg-white text-base font-black text-neutral-900"
+                    >
+                      建立新帳號
+                    </button>
 
                     <Button
                       onClick={() => setTab("ai-support")}
