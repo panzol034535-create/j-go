@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useClerk, useUser } from "@clerk/nextjs";
@@ -34,16 +34,36 @@ function resolveAuthMode(pathname: string | null, mode: LookPickAuthPageProps["m
   return mode;
 }
 
+async function waitForValue<T>(getValue: () => T | null | undefined, timeoutMs = 8000) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const value = getValue();
+    if (value) {
+      return value;
+    }
+
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 100);
+    });
+  }
+
+  return null;
+}
+
 export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { loaded: clerkLoaded } = useClerk();
+  const { client, setActive: clerkSetActive } = useClerk();
   const { isSignedIn } = useUser();
-  const { signIn, setActive: setSignInActive } = useSignIn();
-  const { signUp, setActive: setSignUpActive } = useSignUp();
+  const { isLoaded: signInLoaded, signIn, setActive: setSignInActive } = useSignIn();
+  const { isLoaded: signUpLoaded, signUp, setActive: setSignUpActive } = useSignUp();
 
   const authMode = resolveAuthMode(pathname, mode);
   const isSignIn = authMode === "sign-in";
+
+  const signInRef = useRef(signIn ?? client?.signIn);
+  const signUpRef = useRef(signUp ?? client?.signUp);
 
   const [step, setStep] = useState<AuthStep>("methods");
   const [email, setEmail] = useState("");
@@ -57,10 +77,41 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
     : "建立帳號後即可收藏商品、查看訂單與結帳";
 
   useEffect(() => {
+    signInRef.current = signIn ?? client?.signIn;
+    signUpRef.current = signUp ?? client?.signUp;
+  }, [signIn, signUp, client]);
+
+  useEffect(() => {
     if (isSignedIn) {
       router.replace("/");
     }
   }, [isSignedIn, router]);
+
+  function getSignInResource() {
+    return signInRef.current ?? signIn ?? client?.signIn ?? null;
+  }
+
+  function getSignUpResource() {
+    return signUpRef.current ?? signUp ?? client?.signUp ?? null;
+  }
+
+  async function resolveSignInResource() {
+    const existing = getSignInResource();
+    if (existing) {
+      return existing;
+    }
+
+    return waitForValue(() => getSignInResource());
+  }
+
+  async function resolveSignUpResource() {
+    const existing = getSignUpResource();
+    if (existing) {
+      return existing;
+    }
+
+    return waitForValue(() => getSignUpResource());
+  }
 
   function getAuthErrorMessage(oauthError: unknown, strategy: OAuthStrategy) {
     const message = getClerkErrorMessage(oauthError);
@@ -85,7 +136,7 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
       throw new Error("無法建立登入狀態，請稍後再試");
     }
 
-    const setActive = isSignIn ? setSignInActive : setSignUpActive;
+    const setActive = isSignIn ? setSignInActive ?? clerkSetActive : setSignUpActive ?? clerkSetActive;
     if (!setActive) {
       throw new Error("登入服務尚未就緒，請重新整理頁面");
     }
@@ -103,16 +154,13 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
     setLoading(true);
 
     try {
-      if (!clerkLoaded) {
-        throw new Error("登入服務初始化中，請稍後再試");
-      }
-
       if (isSignIn) {
-        if (!signIn) {
-          throw new Error("登入服務尚未就緒，請重新整理頁面");
+        const signInResource = await resolveSignInResource();
+        if (!signInResource) {
+          throw new Error("登入服務初始化中，請稍後再試");
         }
 
-        await signIn.authenticateWithRedirect({
+        await signInResource.authenticateWithRedirect({
           strategy,
           redirectUrl: "/sso-callback",
           redirectUrlComplete: "/",
@@ -120,11 +168,12 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
         return;
       }
 
-      if (!signUp) {
-        throw new Error("註冊服務尚未就緒，請重新整理頁面");
+      const signUpResource = await resolveSignUpResource();
+      if (!signUpResource) {
+        throw new Error("註冊服務初始化中，請稍後再試");
       }
 
-      await signUp.authenticateWithRedirect({
+      await signUpResource.authenticateWithRedirect({
         strategy,
         redirectUrl: "/sso-callback",
         redirectUrlComplete: "/",
@@ -148,17 +197,14 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
     setLoading(true);
 
     try {
-      if (!clerkLoaded) {
-        throw new Error("登入服務初始化中，請稍後再試");
-      }
-
       if (isSignIn) {
-        if (!signIn) {
-          throw new Error("登入服務尚未就緒，請重新整理頁面");
+        const signInResource = await resolveSignInResource();
+        if (!signInResource) {
+          throw new Error("登入服務初始化中，請稍後再試");
         }
 
-        await signIn.create({ identifier: trimmedEmail });
-        const emailCodeFactor = signIn.supportedFirstFactors?.find(
+        await signInResource.create({ identifier: trimmedEmail });
+        const emailCodeFactor = signInResource.supportedFirstFactors?.find(
           (factor) => factor.strategy === "email_code",
         );
 
@@ -166,17 +212,18 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
           throw new Error("此 Email 無法使用驗證碼登入，請改用其他方式");
         }
 
-        await signIn.prepareFirstFactor({
+        await signInResource.prepareFirstFactor({
           strategy: "email_code",
           emailAddressId: emailCodeFactor.emailAddressId,
         });
       } else {
-        if (!signUp) {
-          throw new Error("註冊服務尚未就緒，請重新整理頁面");
+        const signUpResource = await resolveSignUpResource();
+        if (!signUpResource) {
+          throw new Error("註冊服務初始化中，請稍後再試");
         }
 
-        await signUp.create({ emailAddress: trimmedEmail });
-        await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+        await signUpResource.create({ emailAddress: trimmedEmail });
+        await signUpResource.prepareEmailAddressVerification({ strategy: "email_code" });
       }
 
       setStep("verify");
@@ -200,16 +247,13 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
     setLoading(true);
 
     try {
-      if (!clerkLoaded) {
-        throw new Error("登入服務初始化中，請稍後再試");
-      }
-
       if (isSignIn) {
-        if (!signIn) {
-          throw new Error("登入服務尚未就緒，請重新整理頁面");
+        const signInResource = await resolveSignInResource();
+        if (!signInResource) {
+          throw new Error("登入服務初始化中，請稍後再試");
         }
 
-        const result = await signIn.attemptFirstFactor({
+        const result = await signInResource.attemptFirstFactor({
           strategy: "email_code",
           code: trimmedCode,
         });
@@ -222,11 +266,12 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
         throw new Error("驗證尚未完成，請稍後再試");
       }
 
-      if (!signUp) {
-        throw new Error("註冊服務尚未就緒，請重新整理頁面");
+      const signUpResource = await resolveSignUpResource();
+      if (!signUpResource) {
+        throw new Error("註冊服務初始化中，請稍後再試");
       }
 
-      const result = await signUp.attemptEmailAddressVerification({ code: trimmedCode });
+      const result = await signUpResource.attemptEmailAddressVerification({ code: trimmedCode });
 
       if (result.status === "complete") {
         await finalizeSession(result.createdSessionId);
@@ -241,6 +286,10 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
     }
   }
 
+  const authReady = isSignIn
+    ? Boolean(getSignInResource()) || signInLoaded
+    : Boolean(getSignUpResource()) || signUpLoaded;
+
   return (
     <div className="rounded-3xl border border-neutral-100 bg-white p-8 shadow-sm">
       <div className="mb-8 text-center">
@@ -248,6 +297,10 @@ export function LookPickAuthPage({ mode }: LookPickAuthPageProps) {
         <h1 className="mt-6 text-2xl font-black tracking-tight text-neutral-900">{title}</h1>
         <p className="mt-2 text-sm font-medium leading-6 text-neutral-500">{subtitle}</p>
       </div>
+
+      {!authReady ? (
+        <p className="mb-4 text-center text-xs font-medium text-neutral-400">正在連線登入服務...</p>
+      ) : null}
 
       {error ? (
         <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
