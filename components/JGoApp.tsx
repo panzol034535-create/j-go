@@ -438,19 +438,20 @@ function clearAppliedCouponStorage() {
 function persistCheckoutDraft(draft: CheckoutDraftPayload) {
   if (typeof window === "undefined") return;
 
-  localStorage.setItem(
-    CHECKOUT_DRAFT_STORAGE_KEY,
-    JSON.stringify({
-      ...draft,
-      saved_at: Date.now(),
-    })
-  );
+  const payload = JSON.stringify({
+    ...draft,
+    saved_at: Date.now(),
+  });
+
+  sessionStorage.setItem(CHECKOUT_DRAFT_STORAGE_KEY, payload);
 }
 
 function readCheckoutDraft(): CheckoutDraftPayload | null {
   if (typeof window === "undefined") return null;
 
-  const raw = localStorage.getItem(CHECKOUT_DRAFT_STORAGE_KEY);
+  const raw =
+    sessionStorage.getItem(CHECKOUT_DRAFT_STORAGE_KEY) ??
+    localStorage.getItem(CHECKOUT_DRAFT_STORAGE_KEY);
   if (!raw) return null;
 
   try {
@@ -464,7 +465,35 @@ function readCheckoutDraft(): CheckoutDraftPayload | null {
 function clearCheckoutDraft() {
   if (typeof window === "undefined") return;
 
+  sessionStorage.removeItem(CHECKOUT_DRAFT_STORAGE_KEY);
   localStorage.removeItem(CHECKOUT_DRAFT_STORAGE_KEY);
+}
+
+function readCartFromStorage(): JGoCartItem[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const savedCart = localStorage.getItem("jgo_cart");
+    const parsedCart = savedCart ? JSON.parse(savedCart) : [];
+    return Array.isArray(parsedCart) ? parsedCart : [];
+  } catch {
+    return [];
+  }
+}
+
+function getCartSubtotal(items: JGoCartItem[]) {
+  return items.reduce((sum, item) => sum + item.price * item.qty, 0);
+}
+
+function hasActiveCheckoutDraft() {
+  if (typeof window === "undefined") return false;
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("store_id") || params.get("CVSStoreID")) {
+    return true;
+  }
+
+  return Boolean(readCheckoutDraft());
 }
 
 function readStoredAppliedCoupon(): { coupon: AppliedCoupon; subtotalAtApply: number } | null {
@@ -590,16 +619,8 @@ export default function JGoApp({
     getClientMountedSnapshot,
     getServerMountedSnapshot
   );
-  const [cart, setCart] = useState<JGoCartItem[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const savedCart = localStorage.getItem("jgo_cart");
-      const parsedCart = savedCart ? JSON.parse(savedCart) : [];
-      return Array.isArray(parsedCart) ? parsedCart : [];
-    } catch {
-      return [];
-    }
-  });
+  const [cart, setCart] = useState<JGoCartItem[]>([]);
+  const [cartHydrated, setCartHydrated] = useState(false);
   const [delivery, setDelivery] = useState(() => {
     if (typeof window === "undefined") return "711";
     return localStorage.getItem("jgo_delivery") || "711";
@@ -687,6 +708,8 @@ export default function JGoApp({
   const supportChatEndRef = useRef<HTMLDivElement | null>(null);
   const cartCouponResetRef = useRef(true);
   const couponRestoredRef = useRef(false);
+  const checkoutBootstrapRef = useRef(false);
+  const checkoutDraftRestoredRef = useRef(false);
   const [lookbookForm, setLookbookForm] = useState({
     title: "",
     image: "",
@@ -741,14 +764,67 @@ export default function JGoApp({
     });
   };
 
+  const applyCheckoutDraftState = (checkoutDraft: CheckoutDraftPayload) => {
+    if (Array.isArray(checkoutDraft.cart) && checkoutDraft.cart.length > 0) {
+      setCart(checkoutDraft.cart);
+      cartCouponResetRef.current = true;
+    }
+
+    if (checkoutDraft.checkoutForm) {
+      setCheckoutForm({
+        name: String(checkoutDraft.checkoutForm.name ?? ""),
+        email: String(checkoutDraft.checkoutForm.email ?? ""),
+        phone: String(checkoutDraft.checkoutForm.phone ?? ""),
+      });
+    }
+
+    if (checkoutDraft.delivery) {
+      setDelivery(checkoutDraft.delivery);
+    }
+
+    if (checkoutDraft.pickupStore) {
+      setPickupStore({
+        store_name: String(checkoutDraft.pickupStore.store_name ?? ""),
+        store_id: String(checkoutDraft.pickupStore.store_id ?? ""),
+        address: String(checkoutDraft.pickupStore.address ?? ""),
+      });
+    }
+
+    if (checkoutDraft.shippingAddress) {
+      setShippingAddress({
+        city: String(checkoutDraft.shippingAddress.city ?? ""),
+        district: String(checkoutDraft.shippingAddress.district ?? ""),
+        address: String(checkoutDraft.shippingAddress.address ?? ""),
+      });
+    }
+
+    if (checkoutDraft.couponCodeInput) {
+      setCouponCodeInput(checkoutDraft.couponCodeInput);
+      localStorage.setItem(COUPON_CODE_INPUT_STORAGE_KEY, checkoutDraft.couponCodeInput);
+    }
+
+    if (checkoutDraft.appliedCoupon) {
+      const draftSubtotal = Array.isArray(checkoutDraft.cart)
+        ? getCartSubtotal(checkoutDraft.cart)
+        : 0;
+      setAppliedCoupon(checkoutDraft.appliedCoupon);
+      persistAppliedCoupon(checkoutDraft.appliedCoupon, draftSubtotal);
+      cartCouponResetRef.current = true;
+    }
+
+    checkoutDraftRestoredRef.current = true;
+  };
+
   useEffect(() => {
     if (!isSignedIn || !user) {
-      
-        setCurrentUser(null);
-        localStorage.removeItem("jgo_current_user");
-        setAccountForm({ name: "", email: "", phone: "" });
+      setCurrentUser(null);
+      localStorage.removeItem("jgo_current_user");
+      setAccountForm({ name: "", email: "", phone: "" });
+
+      if (!checkoutDraftRestoredRef.current && !hasActiveCheckoutDraft()) {
         setCheckoutForm({ name: "", email: "", phone: "" });
-      
+      }
+
       return;
     }
 
@@ -757,7 +833,16 @@ export default function JGoApp({
     setCurrentUser(clerkUser);
     localStorage.setItem("jgo_current_user", JSON.stringify(clerkUser));
     setAccountForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
-    setCheckoutForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
+
+    if (checkoutDraftRestoredRef.current || hasActiveCheckoutDraft()) {
+      return;
+    }
+
+    setCheckoutForm({
+      name: clerkUser.name,
+      email: clerkUser.email,
+      phone: clerkUser.phone,
+    });
   }, [isSignedIn, user?.id, user?.unsafeMetadata, user?.externalAccounts, user?.primaryEmailAddress?.id]);
 
   const loginMethodsLabel = user ? formatClerkLoginMethods(user) : currentUser?.provider || "Email";
@@ -801,9 +886,94 @@ export default function JGoApp({
   }, [mounted, favoriteIdsStorageKey, favoriteLookbookIdsStorageKey]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || checkoutBootstrapRef.current) return;
+
+    checkoutBootstrapRef.current = true;
+
+    queueMicrotask(() => {
+      const params = new URLSearchParams(window.location.search);
+      const storeId = params.get("store_id") || params.get("CVSStoreID");
+      const storeName = params.get("store_name") || params.get("CVSStoreName");
+      const storeAddress = params.get("address") || params.get("CVSAddress");
+      const isCvsReturn = Boolean(storeId && storeName);
+      const isPaymentSuccess = params.get("payment") === "success";
+
+      if (isPaymentSuccess) {
+        const savedUser = localStorage.getItem("jgo_current_user");
+
+        if (savedUser) {
+          try {
+            const paymentUser = JSON.parse(savedUser);
+            trackPurchaseSuccess(readLatestPurchaseFromStorage(paymentUser.email));
+          } catch {
+            trackPurchaseSuccess();
+          }
+        } else {
+          trackPurchaseSuccess();
+        }
+
+        setPaymentMessage("付款成功，正在更新訂單...");
+        setTab("payment-result");
+        refreshProductsFromXano({ hasCache: true });
+
+        if (savedUser) {
+          const paymentUser = JSON.parse(savedUser);
+          setCurrentUser(paymentUser);
+
+          setTimeout(async () => {
+            await loadOrdersForUser(paymentUser);
+            setTab("orders");
+          }, 3500);
+        }
+
+        window.history.replaceState({}, "", window.location.pathname);
+        setCartHydrated(true);
+        return;
+      }
+
+      const checkoutDraft = readCheckoutDraft();
+
+      if (isCvsReturn || checkoutDraft?.tab === "checkout") {
+        if (checkoutDraft) {
+          applyCheckoutDraftState(checkoutDraft);
+        } else {
+          const savedCart = readCartFromStorage();
+          if (savedCart.length > 0) {
+            setCart(savedCart);
+            cartCouponResetRef.current = true;
+          }
+        }
+
+        if (isCvsReturn) {
+          const nextPickupStore = {
+            store_id: String(storeId),
+            store_name: String(storeName),
+            address: storeAddress ? String(storeAddress) : "",
+          };
+          setPickupStore(nextPickupStore);
+          localStorage.setItem("jgo_pickup_store", JSON.stringify(nextPickupStore));
+          setDelivery("711");
+          setTab("checkout");
+          window.history.replaceState({}, "", window.location.pathname);
+        } else if (checkoutDraft?.tab === "checkout") {
+          setTab("checkout");
+        }
+      } else {
+        const savedCart = readCartFromStorage();
+        if (savedCart.length > 0) {
+          setCart(savedCart);
+          cartCouponResetRef.current = true;
+        }
+      }
+
+      setCartHydrated(true);
+    });
+  }, [mounted]);
+
+  useEffect(() => {
+    if (!mounted || !cartHydrated) return;
     localStorage.setItem("jgo_cart", JSON.stringify(cart));
-  }, [cart, mounted]);
+  }, [cart, mounted, cartHydrated]);
 
   useEffect(() => {
     localStorage.setItem("jgo_pickup_store", JSON.stringify(pickupStore));
@@ -1850,11 +2020,15 @@ export default function JGoApp({
   }, [cart]);
 
   useEffect(() => {
-    if (!mounted || couponRestoredRef.current) return;
+    if (!mounted || !cartHydrated || couponRestoredRef.current) return;
 
     couponRestoredRef.current = true;
 
     queueMicrotask(() => {
+      if (checkoutDraftRestoredRef.current) {
+        return;
+      }
+
       const storedCode = localStorage.getItem(COUPON_CODE_INPUT_STORAGE_KEY);
       const stored = readStoredAppliedCoupon();
 
@@ -1873,7 +2047,41 @@ export default function JGoApp({
         setCouponCodeInput(storedCode);
       }
     });
-  }, [mounted, subtotal]);
+  }, [mounted, cartHydrated, subtotal]);
+
+  useEffect(() => {
+    if (!mounted || !cartHydrated || tab !== "checkout") return;
+
+    const hasDraftContent =
+      cart.length > 0 ||
+      Boolean(checkoutForm.name.trim() || checkoutForm.email.trim() || checkoutForm.phone.trim()) ||
+      Boolean(appliedCoupon) ||
+      Boolean(couponCodeInput.trim());
+
+    if (!hasDraftContent) return;
+
+    persistCheckoutDraft({
+      cart,
+      checkoutForm,
+      delivery,
+      pickupStore,
+      shippingAddress,
+      couponCodeInput,
+      appliedCoupon,
+      tab: "checkout",
+    });
+  }, [
+    mounted,
+    cartHydrated,
+    tab,
+    cart,
+    checkoutForm,
+    delivery,
+    pickupStore,
+    shippingAddress,
+    couponCodeInput,
+    appliedCoupon,
+  ]);
 
   const removeAppliedCoupon = () => {
     setAppliedCoupon(null);
@@ -2610,102 +2818,6 @@ export default function JGoApp({
       ordersLoadingRef.current = false;
     }
   };
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    queueMicrotask(() => {
-      const params = new URLSearchParams(window.location.search);
-
-      if (params.get("payment") === "success") {
-        const savedUser = localStorage.getItem("jgo_current_user");
-
-        if (savedUser) {
-          try {
-            const user = JSON.parse(savedUser);
-            trackPurchaseSuccess(readLatestPurchaseFromStorage(user.email));
-          } catch {
-            trackPurchaseSuccess();
-          }
-        } else {
-          trackPurchaseSuccess();
-        }
-
-        setPaymentMessage("付款成功，正在更新訂單...");
-        setTab("payment-result");
-        refreshProductsFromXano({ hasCache: true });
-
-        if (savedUser) {
-          const user = JSON.parse(savedUser);
-          setCurrentUser(user);
-
-          setTimeout(async () => {
-            await loadOrdersForUser(user);
-            setTab("orders");
-          }, 3500);
-        }
-
-        window.history.replaceState({}, "", window.location.pathname);
-        return;
-      }
-
-      const storeId = params.get("store_id") || params.get("CVSStoreID");
-      const storeName = params.get("store_name") || params.get("CVSStoreName");
-      const storeAddress = params.get("address") || params.get("CVSAddress");
-
-      if (storeId && storeName) {
-        const checkoutDraft = readCheckoutDraft();
-
-        if (checkoutDraft) {
-          if (Array.isArray(checkoutDraft.cart)) {
-            setCart(checkoutDraft.cart);
-            localStorage.setItem("jgo_cart", JSON.stringify(checkoutDraft.cart));
-            cartCouponResetRef.current = true;
-          }
-
-          if (checkoutDraft.checkoutForm) {
-            setCheckoutForm({
-              name: String(checkoutDraft.checkoutForm.name ?? ""),
-              email: String(checkoutDraft.checkoutForm.email ?? ""),
-              phone: String(checkoutDraft.checkoutForm.phone ?? ""),
-            });
-          }
-
-          if (checkoutDraft.shippingAddress) {
-            setShippingAddress({
-              city: String(checkoutDraft.shippingAddress.city ?? ""),
-              district: String(checkoutDraft.shippingAddress.district ?? ""),
-              address: String(checkoutDraft.shippingAddress.address ?? ""),
-            });
-          }
-
-          if (checkoutDraft.couponCodeInput) {
-            setCouponCodeInput(checkoutDraft.couponCodeInput);
-            localStorage.setItem(COUPON_CODE_INPUT_STORAGE_KEY, checkoutDraft.couponCodeInput);
-          }
-
-          if (checkoutDraft.appliedCoupon) {
-            setAppliedCoupon(checkoutDraft.appliedCoupon);
-            const draftSubtotal = Array.isArray(checkoutDraft.cart)
-              ? checkoutDraft.cart.reduce((sum, item) => sum + item.price * item.qty, 0)
-              : subtotal;
-            persistAppliedCoupon(checkoutDraft.appliedCoupon, draftSubtotal);
-          }
-        }
-
-        const nextPickupStore = {
-          store_id: storeId,
-          store_name: storeName,
-          address: storeAddress || "",
-        };
-        setPickupStore(nextPickupStore);
-        localStorage.setItem("jgo_pickup_store", JSON.stringify(nextPickupStore));
-        setDelivery("711");
-        setTab("checkout");
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    });
-  }, []);
 
   useEffect(() => {
     if (tab === "orders" && currentUser?.email) {
@@ -4494,9 +4606,6 @@ export default function JGoApp({
 
                           const data = await response.json();
 
-                          localStorage.setItem("jgo_cart", JSON.stringify(cart));
-                          localStorage.setItem("jgo_delivery", delivery);
-                          localStorage.setItem("jgo_pickup_store", JSON.stringify(pickupStore));
                           saveCheckoutDraft();
 
                           if (data.cvs_map_url) {
