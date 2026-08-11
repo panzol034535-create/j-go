@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { buildServerSiteUrl } from "@/lib/site-url";
 
 export async function POST() {
   return NextResponse.redirect(
-    "https://j-go-xd5a.vercel.app?payment=success",
-    303
+    buildServerSiteUrl("/", {
+      payment: "success",
+    }),
+    303,
   );
 }

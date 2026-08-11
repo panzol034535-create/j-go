@@ -42,7 +42,7 @@ Change it in:
 Production example:
 
 ```text
-https://j-go-xd5a.vercel.app
+https://lookpick.tw
 ```
 
 ## Development

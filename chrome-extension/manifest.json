@@ -8,6 +8,8 @@
     "https://zozo.jp/*",
     "https://*.zozo.jp/*",
     "http://localhost:3000/*",
+    "https://lookpick.tw/*",
+    "https://*.lookpick.tw/*",
     "https://j-go-xd5a.vercel.app/*",
     "https://*.vercel.app/*"
   ],
@@ -30,6 +32,8 @@
     {
       "matches": [
         "http://localhost:3000/admin/stock-monitor*",
+        "https://lookpick.tw/admin/stock-monitor*",
+        "https://*.lookpick.tw/admin/stock-monitor*",
         "https://j-go-xd5a.vercel.app/admin/stock-monitor*",
         "https://*.vercel.app/admin/stock-monitor*"
       ],

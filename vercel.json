@@ -1,0 +1,26 @@
+{
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "j-go-xd5a.vercel.app"
+        }
+      ],
+      "destination": "https://lookpick.tw/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.lookpick.tw"
+        }
+      ],
+      "destination": "https://lookpick.tw/:path*",
+      "permanent": true
+    }
+  ]
+}

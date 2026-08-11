@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { buildServerSiteUrl } from "@/lib/site-url";
 
 export async function POST(req: Request) {
   const formData = await req.formData();
@@ -7,11 +8,11 @@ export async function POST(req: Request) {
   const storeName = formData.get("CVSStoreName") || "";
   const address = formData.get("CVSAddress") || "";
 
-  const redirectUrl =
-    `https://j-go-xd5a.vercel.app` +
-    `?store_id=${encodeURIComponent(String(storeId))}` +
-    `&store_name=${encodeURIComponent(String(storeName))}` +
-    `&address=${encodeURIComponent(String(address))}`;
+  const redirectUrl = buildServerSiteUrl("/", {
+    store_id: String(storeId),
+    store_name: String(storeName),
+    address: String(address),
+  });
 
   return NextResponse.redirect(redirectUrl, 303);
 }

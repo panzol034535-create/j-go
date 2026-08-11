@@ -1,18 +1,13 @@
 import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { badRequestResponse, serverErrorResponse } from "@/lib/auth/require-admin";
+import { resolveServerSiteUrl } from "@/lib/site-url";
 
 const DEFAULT_MAP_URL = "https://logistics.ecpay.com.tw/Express/map";
-const DEFAULT_SITE_URL = "https://j-go-xd5a.vercel.app";
 
 function resolveMapUrl(): string {
   const configured = process.env.ECPAY_LOGISTICS_MAP_URL?.trim();
   return configured || DEFAULT_MAP_URL;
-}
-
-function resolveSiteUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-  return (configured || DEFAULT_SITE_URL).replace(/\/$/, "");
 }
 
 function generateCheckMacValue(
@@ -61,7 +56,7 @@ export async function POST(request: NextRequest) {
   }
 
   const cvsMapUrl = resolveMapUrl();
-  const siteUrl = resolveSiteUrl();
+  const siteUrl = resolveServerSiteUrl();
   // J-GO 使用 7-11 C2C 交貨便，故使用 UNIMARTC2C。
   const logisticsSubType =
     String(body.logistics_sub_type ?? "UNIMARTC2C").trim() || "UNIMARTC2C";
