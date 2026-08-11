@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState, useEffect, useRef, useSyncExternalStore } from "react";
-import { UserButton, useUser } from "@clerk/nextjs";
+import { useClerk, useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import { ShoppingBag, Search, Home, User, Package, Trash2, Plus, Minus, MapPin, Truck, Store, CheckCircle2, Mail, Lock, LogOut, Sparkles, ChevronDown, Heart, ShieldCheck, Clock, MessageCircle, Send } from "lucide-react";
 import {
@@ -64,6 +64,8 @@ import {
 } from "@/lib/rankings/favorite-ranking";
 import { parseRankingItems } from "@/lib/rankings/ranking-response";
 import { HOME_TRUST_CARDS, PRODUCT_TRUST_BADGES } from "@/lib/trust-signals";
+import { formatClerkLoginMethods } from "@/lib/auth/clerk-login-methods";
+import { LookPickMemberMenu } from "@/components/LookPickMemberMenu";
 import {
   readLatestPurchaseFromStorage,
   trackAddToCart,
@@ -532,7 +534,7 @@ function buildJGoUserFromClerk(clerkUser: ClerkUserResource): JGoUser {
     name: metadataName || clerkUser.fullName || clerkUser.firstName || "LookPick 會員",
     email: clerkUser.primaryEmailAddress?.emailAddress || "",
     phone: metadataPhone || clerkUser.primaryPhoneNumber?.phoneNumber || "",
-    provider: "Clerk",
+    provider: formatClerkLoginMethods(clerkUser),
   };
 }
 
@@ -546,6 +548,7 @@ export default function JGoApp({
   const hasInitialLookbooks = initialLookbooks.length > 0;
   const hasInitialRankingsData = hasInitialRankings(initialRankings);
   const { user, isSignedIn } = useUser();
+  const { signOut } = useClerk();
   const favoriteIdsStorageKey = useMemo(
     () => getFavoriteIdsStorageKey(user?.id),
     [user?.id]
@@ -755,7 +758,23 @@ export default function JGoApp({
     localStorage.setItem("jgo_current_user", JSON.stringify(clerkUser));
     setAccountForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
     setCheckoutForm({ name: clerkUser.name, email: clerkUser.email, phone: clerkUser.phone });
-  }, [isSignedIn, user?.id, user?.unsafeMetadata]);
+  }, [isSignedIn, user?.id, user?.unsafeMetadata, user?.externalAccounts, user?.primaryEmailAddress?.id]);
+
+  const loginMethodsLabel = user ? formatClerkLoginMethods(user) : currentUser?.provider || "Email";
+
+  const clearLocalSessionState = () => {
+    setCurrentUser(null);
+    localStorage.removeItem("jgo_current_user");
+    setCart([]);
+    setOrders([]);
+    setCheckoutForm({ name: "", email: "", phone: "" });
+    setAccountForm({ name: "", email: "", phone: "" });
+  };
+
+  const handleMemberSignOut = async () => {
+    clearLocalSessionState();
+    await signOut({ redirectUrl: "/" });
+  };
 
   useEffect(() => {
     if (!mounted) return;
@@ -2479,7 +2498,7 @@ export default function JGoApp({
         name,
         email: user.primaryEmailAddress?.emailAddress || currentUser.email,
         phone,
-        provider: "Clerk",
+        provider: formatClerkLoginMethods(user),
       };
 
       setCurrentUser(updatedUser);
@@ -2493,13 +2512,7 @@ export default function JGoApp({
   };
 
   const logout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem("jgo_current_user");
-    setCart([]);
-    setOrders([]);
-    setCheckoutForm({ name: "", email: "", phone: "" });
-    setAccountForm({ name: "", email: "", phone: "" });
-    setTab("account");
+    void handleMemberSignOut();
   };
 
   const getUserOrderKey = (user) => user?.email || "guest";
@@ -3158,19 +3171,12 @@ export default function JGoApp({
               <span className="lookpick-header-pick">Pick</span>
             </button>
             <div className="lookpick-header-actions flex shrink-0 items-center gap-2">
-            <button
-              onClick={() => {
-                if (!isSignedIn) {
-                  window.location.assign("/sign-in");
-                  return;
-                }
-                setTab("account");
-              }}
-              className="rounded-full border border-neutral-200 bg-white p-3 text-neutral-700 transition hover:bg-neutral-50 active:scale-[0.98] active:bg-neutral-100"
-              aria-label="我的帳號"
-            >
-              <User size={20} />
-            </button>
+            <LookPickMemberMenu
+              onNavigateAccount={() => setTab("account")}
+              onNavigateOrders={() => setTab("orders")}
+              onNavigateFavorites={() => setTab("favorites")}
+              onSignOut={clearLocalSessionState}
+            />
             <button
               onClick={() => setTab("ai-support")}
               className="h-12 w-12 overflow-hidden rounded-full border border-neutral-200 bg-white transition hover:bg-neutral-50 active:scale-[0.98] active:bg-neutral-100"
@@ -4595,14 +4601,26 @@ export default function JGoApp({
                 <Card className="rounded-3xl border-neutral-100 shadow-sm">
                   <CardContent className="space-y-4 p-5">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-900 text-xl font-black text-white">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-900 text-xl font-black text-white ring-2 ring-[#f08f92]/40">
                         {(currentUser.name || "J").slice(0, 1)}
                       </div>
-                      <div>
-                        <h3 className="text-lg font-black">{currentUser.name}</h3>
-                        <p className="text-sm text-neutral-500">{currentUser.email}</p>
-                        <p className="text-sm text-neutral-500">{currentUser.phone}</p>
-                        <p className="text-xs text-neutral-400">登入方式：{currentUser.provider}</p>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div>
+                          <p className="text-xs font-bold text-neutral-400">姓名</p>
+                          <h3 className="text-lg font-black text-neutral-900">{currentUser.name}</h3>
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-neutral-400">Email</p>
+                          <p className="truncate text-sm text-neutral-600">{currentUser.email || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-neutral-400">手機號碼</p>
+                          <p className="text-sm text-neutral-600">{currentUser.phone || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-neutral-400">登入方式</p>
+                          <p className="text-sm font-medium text-neutral-700">{loginMethodsLabel}</p>
+                        </div>
                       </div>
                     </div>
                     <div className="space-y-3 rounded-3xl bg-neutral-50 p-4">
@@ -4644,10 +4662,15 @@ export default function JGoApp({
                       </a>
                     </div>
 
-                    <div className="flex items-center justify-between rounded-2xl bg-neutral-50 px-4 py-3">
-                      <span className="text-sm font-black text-neutral-600">帳號設定 / 登出</span>
-                      <UserButton />
-                    </div>
+                    <Button
+                      onClick={() => void handleMemberSignOut()}
+                      className="h-12 w-full rounded-2xl border border-neutral-200 bg-white text-base text-red-600"
+                    >
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <LogOut size={18} />
+                        登出
+                      </span>
+                    </Button>
                   </CardContent>
                 </Card>
               ) : (
